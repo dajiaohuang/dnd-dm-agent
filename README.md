@@ -205,12 +205,10 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/ingest/rules
 ### Frontend
 
 ```powershell
-cd frontend
-npm install
-npm run dev
+run_webui.bat
 ```
 
-Open <http://localhost:3000>.
+Open <http://127.0.0.1:3000>. The latest WebUI includes play and turn controls, conversational campaign editing, draft review, memory and story-thread views, rule/spell retrieval, and character status.
 
 ### Docker Compose
 

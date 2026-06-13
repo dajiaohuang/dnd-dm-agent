@@ -205,12 +205,10 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/ingest/rules
 ### 前端
 
 ```powershell
-cd frontend
-npm install
-npm run dev
+run_webui.bat
 ```
 
-访问 <http://localhost:3000>。
+访问 <http://127.0.0.1:3000>。最新版 WebUI 包含游玩与回合控制、对话式战役编辑、草稿审阅、记忆与剧情线、规则/法术检索和角色状态。
 
 ### Docker Compose
 
