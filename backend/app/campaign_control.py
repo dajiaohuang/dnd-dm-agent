@@ -41,8 +41,6 @@ def play_style(campaign: Campaign) -> str:
 
 
 def append_play_event(db: Session, campaign: Campaign, *args, **kwargs):
-    if play_style(campaign) == "dice_assistant":
-        return None
     return append_event(db, campaign.id, *args, **kwargs)
 
 
@@ -97,7 +95,8 @@ def execute_command(
     if play_style(campaign) == "dice_assistant" and command.name in campaign_only:
         return command_result(
             command.name,
-            "骰娘模式不管理战役剧情、设定、事件或记忆。请先使用 /退出骰娘 返回战役叙事模式。",
+            "骰娘模式不管理预设战役剧情或设定编辑，但仍会写入操作审计与记忆。"
+            "请先使用 /退出骰娘 返回战役叙事模式后再执行此命令。",
             ok=False,
         )
 
@@ -146,8 +145,8 @@ def execute_command(
         campaign.config = config
         db.commit()
         return command_result("enter_dice_assistant", (
-            "已进入骰娘模式。不会管理或推进战役剧情，也不会写入战役事件和记忆；"
-            "仍可管理角色卡、物品、检定、先攻、伤害、治疗和战斗回合。"
+            "已进入骰娘模式。不会代替真实 DM 推进预设剧情；会审计被 @ 的操作、在场角色、"
+            "检定和战斗，并维护可检索记忆。仍可管理角色卡、物品、先攻、伤害、治疗和战斗回合。"
         ))
 
     if command.name == "exit_dice_assistant":

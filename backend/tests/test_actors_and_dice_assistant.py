@@ -76,7 +76,7 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
         entered = client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/diceassistant"}).json()
         assert entered["ok"]
         assert client.get(f"/campaigns/{campaign_id}/status").json()["play_style"] == "dice_assistant"
-        assert not client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/memory anything"}).json()["ok"]
+        assert client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/memory anything"}).json()["ok"]
         assert not client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/save"}).json()["ok"]
 
         check = client.post(f"/chat/{campaign_id}", json={
@@ -91,9 +91,30 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
         hp = client.post(f"/chat/{campaign_id}", json={
             "session_id": "dice", "player_id": "player", "character_id": player["id"], "message": "伤害 4",
         }).json()
-        assert hp["events"] == []
+        assert hp["events"][0]["event_type"] == "dice_assistant_action"
         assert hp["state_changes"][0]["before"] - hp["state_changes"][0]["after"] == 4
-        assert len(client.get(f"/campaigns/{campaign_id}/events").json()) == before_events
+        assert len(client.get(f"/campaigns/{campaign_id}/events").json()) > before_events
+        assert client.get(f"/campaigns/{campaign_id}/memories", params={"query": "伤害"}).json()
+
+        memory_update = client.post(f"/chat/{campaign_id}", json={
+            "session_id": "dice", "player_id": "player", "character_id": player["id"], "message": "更新记忆：Hero拿到了银钥匙",
+        }).json()
+        assert memory_update["data"]["present_actors"]
+        assert "要不要读取前面的聊天记录" in memory_update["narration"]
+        declined = client.post(f"/chat/{campaign_id}", json={
+            "session_id": "dice", "player_id": "player", "character_id": player["id"], "message": "不要",
+        }).json()
+        assert "不读取前文" in declined["narration"]
+
+        setup = client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "开始战斗"}).json()
+        assert "哪些角色参战" in setup["narration"]
+        started = client.post(f"/chat/{campaign_id}", json={
+            "session_id": "dice", "message": "角色：Hero、Mira、Ogre；优势：Hero；劣势：Ogre",
+        }).json()
+        assert started["data"]["turn_state"]["combat"]
+        modes = {item["name"]: item["initiative_mode"] for item in started["data"]["turn_state"]["participants"]}
+        assert modes == {"Hero": "advantage", "Mira": "normal", "Ogre": "disadvantage"}
+        client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/endcombat"})
 
         client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/exitdice"})
         assert client.get(f"/campaigns/{campaign_id}/status").json()["play_style"] == "campaign"

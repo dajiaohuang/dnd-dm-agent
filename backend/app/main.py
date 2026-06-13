@@ -22,7 +22,7 @@ from app.tools.dice import roll_dice
 from app.config import settings
 from app.integrations.napcat import (NapCatClient, callback_token_valid, download_attachments,
                                      is_allowed, is_dm_user, is_group_at_event, is_supported_message,
-                                     parse_event_text)
+                                     mentioned_user_ids, message_text, parse_event_text, replied_message_id)
 from app.message_router import process_message
 from app.parsing.api import router as parsing_router
 from app.parsing.router import parse_files
@@ -119,6 +119,13 @@ async def napcat_callback(
         return {"ok": True, "ignored": "group_message_without_at"}
 
     text = parse_event_text(payload, client.self_id)
+    reply_text = ""
+    reply_id = replied_message_id(payload)
+    if reply_id:
+        try:
+            reply_text = message_text(client.get_message(reply_id), client.self_id)
+        except Exception:
+            reply_text = ""
     temp_root, paths, attachment_errors = download_attachments(client, payload)
     try:
         parsed = parse_files(paths, per_file_max_chars=4000, total_max_chars=12000) if paths else None
@@ -146,8 +153,34 @@ async def napcat_callback(
     ))
     if binding:
         character_id = binding.character_id
+    message_context = {
+        "current_text": text,
+        "reply_text": reply_text,
+        "reply_message_id": reply_id,
+        "mentioned_user_ids": mentioned_user_ids(payload, client.self_id),
+        "message_id": payload.get("message_id"),
+        "group_id": group_id or None,
+        "sender_id": user_id,
+    }
+    confirmation_words = {"是", "要", "好", "好的", "可以", "yes", "y", "读取", "讀取"}
+    if (group_id and (campaign.config or {}).get("play_style") == "dice_assistant"
+            and any(word in confirmation_words for word in text.casefold().split())):
+        try:
+            message_context["group_history"] = [
+                {
+                    "message_id": item.get("message_id"),
+                    "sender_id": str(item.get("user_id") or (item.get("sender") or {}).get("user_id") or ""),
+                    "text": message_text(item, client.self_id),
+                    "time": item.get("time"),
+                }
+                for item in client.get_group_history(group_id, 20)
+                if str(item.get("message_id") or "") != str(payload.get("message_id") or "")
+            ]
+        except Exception as exc:
+            message_context["group_history_error"] = str(exc)
     result = process_message(
-        db, campaign, session_id, character_id, text, actor_id=user_id, is_dm=is_dm_user(user_id)
+        db, campaign, session_id, character_id, text, actor_id=user_id, is_dm=is_dm_user(user_id),
+        message_context=message_context,
     )
     answer = result["narration"]
     reply: str | list[dict] = answer

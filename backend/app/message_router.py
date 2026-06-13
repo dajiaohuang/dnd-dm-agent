@@ -6,14 +6,15 @@ from app.campaign_control import campaign_status, command_result, execute_comman
 from app.commands import route_command
 from app.config import settings
 from app.db.models import Campaign, Character
-from app.services import resolve_chat
+from app.services import append_event, resolve_chat, serialize
 from app.tools.spell_catalog import direct_spell_lookup, format_spell
 from app.campaign_memory import build_memory_package
 from app.campaign_turns import (
     advance_turn, current_turn, format_turn_state, runtime_mode, turn_access, turn_notification,
 )
 from app.campaign_editor import editor_chat
-from app.dice_assistant import resolve_dice_assistant
+from app.dice_assistant import dice_context_action, resolve_dice_assistant
+from app.actor_manager import list_actors, is_present
 
 
 def process_message(
@@ -24,12 +25,11 @@ def process_message(
     message: str,
     actor_id: str | None = None,
     is_dm: bool = False,
+    message_context: dict | None = None,
 ) -> dict:
     compact = " ".join(message.strip().split())
     lowered = compact.casefold()
     if lowered.startswith(("/记忆", "/memory")):
-        if (campaign.config or {}).get("play_style") == "dice_assistant":
-            return command_result("memory", "骰娘模式不读取或管理战役记忆。", ok=False)
         query = compact.split(maxsplit=1)[1] if len(compact.split(maxsplit=1)) > 1 else compact
         package = build_memory_package(db, campaign.id, query, session_id)
         lines = [f"- [{item['type']}] {item['content']}" for item in package["memories"]]
@@ -40,6 +40,10 @@ def process_message(
         package = build_memory_package(db, campaign.id, compact, session_id)
         lines = [f"- {item['title']}: {item['description']}" for item in package["threads"]]
         return command_result("threads", "\n".join(lines) or "当前没有开放的剧情线。", data=package)
+    if (campaign.config or {}).get("play_style") == "dice_assistant":
+        contextual = dice_context_action(db, campaign, message, message_context)
+        if contextual:
+            return audit_dice_result(db, campaign, session_id, character_id, actor_id, message, contextual, message_context)
     command = route_command(message)
     if command:
         return execute_command(db, command, campaign, session_id, actor_id, is_dm)
@@ -73,8 +77,10 @@ def process_message(
             advance_turn(db, campaign)
             result["turn_notification"] = turn_notification(db, campaign)
             result["narration"] += f"\n\n{format_turn_state(campaign)}"
-            return result
-        return resolve_dice_assistant(db, campaign, character, message)
+            return audit_dice_result(db, campaign, session_id, character.id if character else None,
+                                     actor_id, message, result, message_context)
+        return audit_dice_result(db, campaign, session_id, character_id, actor_id, message,
+                                 resolve_dice_assistant(db, campaign, character, message), message_context)
     if campaign_status(campaign) == "paused":
         return command_result(
             "paused",
@@ -94,4 +100,49 @@ def process_message(
         notification = turn_notification(db, campaign)
         result["turn_notification"] = notification
         result["narration"] += f"\n\n{format_turn_state(campaign)}"
+    return result
+
+
+def audit_dice_result(
+    db: Session,
+    campaign: Campaign,
+    session_id: str | None,
+    character_id: str | None,
+    actor_id: str | None,
+    message: str,
+    result: dict,
+    message_context: dict | None,
+) -> dict:
+    present = [item for item in list_actors(db, campaign.id) if is_present(item)]
+    actors = [character_id] if character_id else []
+    audit_content = str((result.get("data") or {}).get("audit_content") or message)
+    event = append_event(
+        db, campaign.id, session_id,
+        str((result.get("data") or {}).get("audit_type") or "dice_assistant_action"),
+        audit_content,
+        actors,
+        {
+            "actor_id": actor_id,
+            "raw_input": message,
+            "dice_response": result.get("narration"),
+            "rolls": result.get("rolls") or [],
+            "state_changes": result.get("state_changes") or [],
+            "message_context": message_context or {},
+            "present_actors": [
+                {
+                    "character_id": item.id,
+                    "name": item.character_name,
+                    "actor_type": (item.data.get("basic") or {}).get("actor_type", "player"),
+                    "hp": (item.data.get("combat") or {}).get("current_hp"),
+                    "conditions": item.data.get("conditions") or [],
+                }
+                for item in present
+            ],
+        },
+        memory_plan={"extract_after_event": True, "intent_type": "dice_assistant", "skip": False},
+    )
+    result["events"] = [serialize(event)]
+    result.setdefault("data", {})["present_actors"] = [
+        {"character_id": item.id, "name": item.character_name} for item in present
+    ]
     return result

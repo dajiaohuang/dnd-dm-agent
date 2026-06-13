@@ -112,7 +112,7 @@ def test_napcat_callback_to_dm(monkeypatch):
     monkeypatch.setattr("app.main.download_attachments", lambda client, payload: (root, [str(attachment)], []))
     monkeypatch.setattr(
         "app.main.process_message",
-        lambda db, campaign, session_id, character_id, text, actor_id, is_dm: (
+        lambda db, campaign, session_id, character_id, text, actor_id, is_dm, message_context=None: (
             used.update(character_id=character_id, actor_id=actor_id, is_dm=is_dm) or {"narration": "ok"}
         ),
     )
@@ -183,3 +183,56 @@ def test_napcat_group_turn_notification_ats_bound_player(monkeypatch):
         assert response.status_code == 200
         assert response.json()["reply"][1] == {"type": "at", "data": {"qq": "456"}}
         assert not sent
+
+
+def test_napcat_group_context_includes_reply_mentions_and_history(monkeypatch):
+    used = {}
+
+    class FakeClient:
+        self_id = "123"
+
+        def get_message(self, message_id):
+            assert str(message_id) == "77"
+            return {"message": [{"type": "text", "data": {"text": "Hero found a silver key."}}]}
+
+        def get_group_history(self, group_id, count=20):
+            assert str(group_id) == "88"
+            return [
+                {
+                    "message_id": 70,
+                    "user_id": 456,
+                    "time": 100,
+                    "message": [{"type": "text", "data": {"text": "The door is locked."}}],
+                },
+            ]
+
+    monkeypatch.setattr("app.main.NapCatClient.from_settings", lambda: FakeClient())
+    monkeypatch.setattr("app.main.download_attachments", lambda client, payload: (Path(tempfile.mkdtemp()), [], []))
+    monkeypatch.setattr(settings, "napcat_campaign_id", "campaign_001")
+    monkeypatch.setattr(settings, "napcat_token", "")
+
+    with TestClient(app) as client:
+        client.post("/demo/bootstrap")
+        client.post("/chat/campaign_001", json={"session_id": "dice", "message": "/diceassistant"})
+        monkeypatch.setattr(
+            "app.main.process_message",
+            lambda *args, **kwargs: used.update(kwargs.get("message_context") or {}) or {"narration": "ok"},
+        )
+        response = client.post("/napcat/callback", json={
+            "post_type": "message",
+            "message_type": "group",
+            "message_id": 78,
+            "group_id": 88,
+            "user_id": 456,
+            "message": [
+                {"type": "reply", "data": {"id": "77"}},
+                {"type": "at", "data": {"qq": "123"}},
+                {"type": "at", "data": {"qq": "999"}},
+                {"type": "text", "data": {"text": " 要"}},
+            ],
+        })
+        assert response.status_code == 200
+        assert used["current_text"] == "@999 要"
+        assert used["reply_text"] == "Hero found a silver key."
+        assert used["mentioned_user_ids"] == ["999"]
+        assert used["group_history"][0]["text"] == "The door is locked."

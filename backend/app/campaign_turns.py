@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Campaign, Character, NapCatCharacterBinding
-from app.tools.dice import roll_dice
+from app.tools.dice import roll_dice, roll_with_advantage
 from app.actor_manager import actor_type, is_present
 
 
@@ -74,11 +74,25 @@ def exit_turn_mode(db: Session, campaign: Campaign) -> bool:
     return True
 
 
-def start_combat(db: Session, campaign: Campaign) -> dict:
+def start_combat(
+    db: Session,
+    campaign: Campaign,
+    participant_ids: list[str] | None = None,
+    initiative_modes: dict[str, str] | None = None,
+) -> dict:
     participants = []
     for character in _characters(db, campaign.id):
+        if participant_ids is not None and character.id not in participant_ids:
+            continue
         modifier = initiative_modifier(character)
-        participants.append(_participant(character, roll_dice(f"1d20{modifier:+d}")))
+        mode = (initiative_modes or {}).get(character.id, "normal")
+        if mode in {"advantage", "disadvantage"}:
+            initiative = roll_with_advantage(modifier, disadvantage=mode == "disadvantage")
+        else:
+            initiative = roll_dice(f"1d20{modifier:+d}")
+        participant = _participant(character, initiative)
+        participant["initiative_mode"] = mode
+        participants.append(participant)
     if not participants:
         return {"combat": False, "round": 1, "turn_index": 0, "participants": []}
     participants.sort(

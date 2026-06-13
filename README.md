@@ -63,7 +63,10 @@ LangGraph orchestrates the DM reasoning phase, DeepSeek generates narrative resp
 - Story-role fields describe why an NPC exists, planned actions in the designed campaign, triggers, and relationships.
 - Presence management determines which NPCs and monsters are currently in the scene and therefore included in initiative.
 - During roleplay, relevant present DM actors and their private instructions are injected into DM reasoning. During combat, their turns are operated by the DM.
-- Dice assistant mode disables campaign narration, setting edits, events, and memory writes while retaining character sheets, items, spells, checks, initiative, damage, healing, and combat turns.
+- Dice assistant mode does not replace the real DM or advance a preset plot, but it continuously audits mentioned operations and present actors while maintaining searchable memory.
+- When mentioned to update memory, it reads the current or replied-to message by default and asks whether it should also ingest earlier group-chat history.
+- When mentioned to start combat, it asks for participants and initiative advantage/disadvantage, rolls initiative, and hosts turns using the DM-mode combat flow.
+- Character sheets, items, spells, checks, damage, healing, and combat assistance remain available; campaign-setting edits still require campaign narration mode.
 
 Every object is stored once in `character.data.inventory`. Equipped objects use `equipped` and
 `equipped_slot`; homebrew properties remain queryable through `custom_data` or additional fields.

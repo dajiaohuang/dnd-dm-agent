@@ -71,6 +71,13 @@ class NapCatClient:
         data = result.get("data") or {}
         return str(data.get("url") or data.get("file") or "")
 
+    def get_message(self, message_id: str | int) -> dict[str, Any]:
+        return (self.post_action("get_msg", {"message_id": int(message_id)}).get("data") or {})
+
+    def get_group_history(self, group_id: str | int, count: int = 20) -> list[dict[str, Any]]:
+        data = self.post_action("get_group_msg_history", {"group_id": int(group_id), "count": count}).get("data") or {}
+        return list(data.get("messages") or [])
+
 
 def parse_event_text(payload: dict[str, Any], self_id: str = "") -> str:
     message = payload.get("message")
@@ -84,6 +91,32 @@ def parse_event_text(payload: dict[str, Any], self_id: str = "") -> str:
         elif kind == "at" and str(data.get("qq", "")).strip() != self_id:
             parts.append(f"@{data.get('qq')} ")
     return " ".join("".join(parts).split()).strip()
+
+
+def mentioned_user_ids(payload: dict[str, Any], self_id: str = "") -> list[str]:
+    message = payload.get("message")
+    if not isinstance(message, list):
+        return []
+    return [
+        str((segment.get("data") or {}).get("qq", "")).strip()
+        for segment in message
+        if segment.get("type") == "at"
+        and str((segment.get("data") or {}).get("qq", "")).strip()
+        and str((segment.get("data") or {}).get("qq", "")).strip() != self_id
+    ]
+
+
+def replied_message_id(payload: dict[str, Any]) -> str | None:
+    message = payload.get("message")
+    if not isinstance(message, list):
+        return None
+    reply = next((segment for segment in message if segment.get("type") == "reply"), None)
+    value = str(((reply or {}).get("data") or {}).get("id", "")).strip()
+    return value or None
+
+
+def message_text(message: dict[str, Any], self_id: str = "") -> str:
+    return parse_event_text(message, self_id) or str(message.get("raw_message") or "").strip()
 
 
 def attachment_segments(payload: dict[str, Any]) -> list[dict[str, str]]:

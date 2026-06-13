@@ -3,11 +3,14 @@ from __future__ import annotations
 import copy
 import re
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Campaign, Character
 from app.services import update_character
 from app.tools.dice import roll_dice, roll_with_advantage
+from app.actor_manager import is_present
+from app.campaign_turns import format_turn_state, start_combat, turn_notification
 
 ABILITY_ALIASES = {
     "力量": "str", "strength": "str", "str": "str",
@@ -36,6 +39,107 @@ def _result(narration: str, rolls: list[dict] | None = None, changes: list[dict]
         "ok": True, "kind": "dice_assistant", "command": "dice_assistant", "narration": narration,
         "data": {}, "rolls": rolls or [], "state_changes": changes or [], "events": [],
     }
+
+
+def _state(campaign: Campaign) -> dict:
+    return copy.deepcopy((campaign.config or {}).get("dice_assistant_state") or {})
+
+
+def _save_state(db: Session, campaign: Campaign, state: dict) -> None:
+    config = copy.deepcopy(campaign.config or {})
+    config["dice_assistant_state"] = state
+    campaign.config = config
+    db.commit()
+
+
+def _yes(text: str) -> bool:
+    words = {"是", "要", "好", "好的", "可以", "yes", "y", "读取", "讀取"}
+    return any(token in words for token in text.casefold().split())
+
+
+def _no(text: str) -> bool:
+    words = {"否", "不", "不要", "不用", "no", "n"}
+    return any(token in words for token in text.casefold().split())
+
+
+def dice_context_action(
+    db: Session,
+    campaign: Campaign,
+    message: str,
+    message_context: dict | None = None,
+) -> dict | None:
+    text = " ".join(message.strip().split())
+    lowered = text.casefold()
+    context = message_context or {}
+    state = _state(campaign)
+
+    if state.get("pending_memory_history"):
+        if _yes(text):
+            history = context.get("group_history") or []
+            state.pop("pending_memory_history", None)
+            _save_state(db, campaign, state)
+            combined = "\n".join(str(item.get("text") or "") for item in history if item.get("text"))
+            result = _result(f"骰娘：已读取并更新前面 {len(history)} 条聊天记录。")
+            result["data"]["audit_content"] = combined or "确认读取前文，但没有取得聊天记录。"
+            result["data"]["audit_type"] = "dice_memory_history_update"
+            return result
+        if _no(text):
+            state.pop("pending_memory_history", None)
+            _save_state(db, campaign, state)
+            return _result("骰娘：好的，仅保留刚才被 @ / 引用的内容，不读取前文。")
+        return _result("骰娘：要读取前面的群聊记录来继续更新记忆吗？请回答“要”或“不要”。")
+
+    if any(term in lowered for term in ("更新记忆", "更新記憶", "记住", "記住", "记录一下", "記錄一下")):
+        source = str(context.get("reply_text") or context.get("current_text") or text).strip()
+        state["pending_memory_history"] = True
+        _save_state(db, campaign, state)
+        result = _result(f"骰娘：已将当前被 @ / 引用内容加入记忆：\n{source}\n\n要不要读取前面的聊天记录来继续更新？")
+        result["data"]["audit_content"] = source
+        result["data"]["audit_type"] = "dice_memory_update"
+        return result
+
+    if state.get("pending_combat_setup"):
+        characters = [
+            item for item in db.scalars(select(Character).where(Character.campaign_id == campaign.id)).all()
+            if is_present(item)
+        ]
+        selected = [item for item in characters if item.character_name.casefold() in lowered]
+        if not selected:
+            names = "、".join(item.character_name for item in characters) or "（当前没有在场角色）"
+            return _result(f"骰娘：请说明参战角色。当前在场角色：{names}\n示例：角色：Aric、Goblin；优势：Aric；劣势：Goblin")
+        advantage_text = lowered.split("优势", 1)[1].split("；", 1)[0] if "优势" in lowered else ""
+        disadvantage_text = lowered.split("劣势", 1)[1].split("；", 1)[0] if "劣势" in lowered else ""
+        modes = {}
+        for item in selected:
+            name = item.character_name.casefold()
+            modes[item.id] = "advantage" if name in advantage_text else "disadvantage" if name in disadvantage_text else "normal"
+        combat = start_combat(db, campaign, [item.id for item in selected], modes)
+        state.pop("pending_combat_setup", None)
+        _save_state(db, campaign, state)
+        order = "\n".join(
+            f"{index + 1}. {item['name']}（{item['initiative_mode']}）：{item['initiative']['total']}"
+            for index, item in enumerate(combat["participants"])
+        )
+        result = _result(f"骰娘：战斗开始，已按优势状态投掷先攻：\n{order}\n\n{format_turn_state(campaign)}",
+                         [item["initiative"] for item in combat["participants"]])
+        result["data"] = {"turn_state": combat, "turn_notification": turn_notification(db, campaign),
+                          "audit_type": "dice_combat_started", "audit_content": text}
+        return result
+
+    if any(term in lowered for term in ("开始战斗", "開始戰鬥", "进入战斗", "進入戰鬥", "start combat", "/combat")):
+        state["pending_combat_setup"] = True
+        _save_state(db, campaign, state)
+        present = [
+            item.character_name for item in db.scalars(select(Character).where(Character.campaign_id == campaign.id)).all()
+            if is_present(item)
+        ]
+        return _result(
+            "骰娘：准备开始战斗。请告诉我：\n"
+            "1. 哪些角色参战？\n2. 哪些角色先攻有优势或劣势？\n"
+            f"当前在场角色：{'、'.join(present) or '无'}\n"
+            "示例：角色：Aric、Goblin；优势：Aric；劣势：Goblin"
+        )
+    return None
 
 
 def _modifier(character: Character | None, text: str) -> tuple[str, int]:
@@ -110,4 +214,4 @@ def resolve_dice_assistant(db: Session, campaign: Campaign, character: Character
         mode = "劣势" if disadvantage else "优势" if advantage else "普通"
         return _result(f"骰娘：{label}检定（{mode}，修正 {modifier:+d}）= {roll['total']}。", [roll])
 
-    return _result("骰娘模式不会推进剧情。请发送骰式（如 2d6+3）、属性/技能检定、先攻，或“伤害 5 / 治疗 5”。")
+    return _result("骰娘不会代替真实 DM 推进剧情，但会审计操作并维护记忆。请发送骰式、检定、更新记忆、开始战斗，或“伤害 5 / 治疗 5”。")
