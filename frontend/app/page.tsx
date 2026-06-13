@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
 type Json = Record<string, any>;
-type Tab = "play" | "settings" | "memory" | "rules";
+type Tab = "play" | "actors" | "settings" | "memory" | "rules";
 type Message = { role: "player" | "dm"; text: string; details?: string };
 
 async function call(path: string, options?: RequestInit) {
@@ -29,6 +29,7 @@ export default function Home() {
   const [campaignId, setCampaignId] = useState("campaign_001");
   const [campaignStatus, setCampaignStatus] = useState<Json>({});
   const [characters, setCharacters] = useState<Json[]>([]);
+  const [actors, setActors] = useState<Json[]>([]);
   const [characterId, setCharacterId] = useState("");
   const [settings, setSettings] = useState<Json[]>([]);
   const [drafts, setDrafts] = useState<Json[]>([]);
@@ -45,6 +46,10 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("正在连接本地 DM Agent…");
+  const [actorName, setActorName] = useState("");
+  const [actorKind, setActorKind] = useState("npc");
+  const [actorPurpose, setActorPurpose] = useState("");
+  const [actorInstructions, setActorInstructions] = useState("");
 
   const character = characters.find((item) => item.id === characterId) || characters[0];
   const hp = character?.data?.combat;
@@ -52,9 +57,10 @@ export default function Home() {
   const pendingDrafts = drafts.filter((item) => item.status === "pending");
 
   const refreshCampaign = useCallback(async (id: string) => {
-    const [status, chars, published, draftList, memoryList, threadList, eventList, conflictList] = await Promise.all([
+    const [status, chars, actorList, published, draftList, memoryList, threadList, eventList, conflictList] = await Promise.all([
       call(`/campaigns/${id}/status`),
       call(`/campaigns/${id}/characters`),
+      call(`/campaigns/${id}/actors`),
       call(`/campaigns/${id}/settings`),
       call(`/campaigns/${id}/setting-drafts`),
       call(`/campaigns/${id}/memories?limit=20`),
@@ -62,7 +68,7 @@ export default function Home() {
       call(`/campaigns/${id}/events`),
       call(`/campaigns/${id}/settings/conflicts`),
     ]);
-    setCampaignStatus(status); setCharacters(chars); setSettings(published); setDrafts(draftList);
+    setCampaignStatus(status); setCharacters(chars); setActors(actorList); setSettings(published); setDrafts(draftList);
     setMemories(memoryList); setThreads(threadList); setEvents(eventList.slice(0, 20)); setConflicts(conflictList);
     setCharacterId((old) => chars.some((item: Json) => item.id === old) ? old : chars[0]?.id || "");
   }, []);
@@ -148,6 +154,25 @@ export default function Home() {
     await action("检索完成", async () => setSearchResults(await call(paths[kind])));
   }
 
+  async function createActor(event: FormEvent) {
+    event.preventDefault();
+    if (!actorName.trim()) return;
+    await action("DM 角色卡已建立", async () => {
+      await call("/characters/build", {
+        method: "POST",
+        body: JSON.stringify({
+          campaign_id: campaignId, player_name: "DM", character_name: actorName.trim(),
+          actor_type: actorKind, class_name: actorKind === "monster" ? "Fighter" : "Rogue",
+          abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+          roleplay: { roleplay_instructions: actorInstructions, public_persona: "", secrets: [], goals: [] },
+          story_role: { purpose: actorPurpose, planned_actions: [], triggers: [] },
+          encounter: { present: false, scene: "" },
+        }),
+      });
+      setActorName(""); setActorPurpose(""); setActorInstructions("");
+    });
+  }
+
   const modes: Record<string, string> = { free: "自由扮演", turn_based: "回合制", combat: "战斗", campaign_edit: "战役编辑" };
   const quick = [
     ["/status", "状态"], ["/turns", "进入回合"], ["/combat", "进入战斗"], ["/endcombat", "结束战斗"],
@@ -169,7 +194,7 @@ export default function Home() {
       </header>
 
       <nav>
-        {([["play", "游玩控制台"], ["settings", `战役设定 ${pendingDrafts.length ? `(${pendingDrafts.length})` : ""}`], ["memory", "记忆与剧情"], ["rules", "规则与角色"]] as [Tab, string][]).map(([id, label]) => (
+        {([["play", "游玩控制台"], ["actors", "NPC / 怪物"], ["settings", `战役设定 ${pendingDrafts.length ? `(${pendingDrafts.length})` : ""}`], ["memory", "记忆与剧情"], ["rules", "规则与角色"]] as [Tab, string][]).map(([id, label]) => (
           <button className={tab === id ? "active" : ""} onClick={() => setTab(id)} key={id}>{label}</button>
         ))}
       </nav>
@@ -177,10 +202,10 @@ export default function Home() {
       <section className="overview">
         <div><small>运行模式</small><strong>{modes[campaignStatus.runtime_mode] || campaignStatus.runtime_mode || "-"}</strong></div>
         <div><small>战役状态</small><strong>{campaignStatus.status || "-"}</strong></div>
-        <div><small>角色</small><strong>{characters.length}</strong></div>
+        <div><small>玩法</small><strong>{campaignStatus.play_style === "dice_assistant" ? "骰娘辅助" : "战役叙事"}</strong></div>
         <div><small>已发布设定</small><strong>{settings.length}</strong></div>
         <div><small>待审草稿</small><strong>{pendingDrafts.length}</strong></div>
-        <div><small>冲突建议</small><strong>{conflicts.length}</strong></div>
+        <div><small>在场 DM 角色</small><strong>{actors.filter((item) => item.data?.basic?.actor_type !== "player" && item.data?.encounter?.present !== false).length}</strong></div>
       </section>
 
       {tab === "play" && <section className="workspace play-grid">
@@ -200,6 +225,8 @@ export default function Home() {
           </div>
           <p className="label section-label">快捷控制</p>
           <div className="command-grid">{quick.map(([cmd, label]) => <button className="chip" key={cmd} onClick={() => send(undefined, cmd)}>{label}</button>)}</div>
+          <p className="label section-label">玩法模式</p>
+          <div className="command-grid"><button className="chip" onClick={() => send(undefined, "/骰娘")}>进入骰娘</button><button className="chip" onClick={() => send(undefined, "/退出骰娘")}>退出骰娘</button></div>
         </aside>
 
         <section className="panel chat-panel">
@@ -216,6 +243,34 @@ export default function Home() {
           <p className="label">最近事件</p>
           {events.slice(0, 8).map((item) => <div className="feed-item" key={item.id}><small>{item.event_type}</small><p>{short(item.content, 110)}</p></div>)}
           {!events.length && <p className="muted">还没有事件。</p>}
+        </aside>
+      </section>}
+
+      {tab === "actors" && <section className="workspace two-col">
+        <section className="panel content-panel">
+          <div className="panel-head"><div><p className="label">DM ACTORS</p><h2>NPC 与怪物角色卡</h2></div></div>
+          <div className="actor-grid">{actors.filter((item) => item.data?.basic?.actor_type !== "player").map((item) => {
+            const present = item.data?.encounter?.present !== false;
+            return <article className="actor-card" key={item.id}>
+              <div className="actor-title"><div className="mini-portrait">{item.character_name?.slice(0, 1)}</div><div><small>{item.data?.basic?.actor_type} · v{item.version}</small><h3>{item.character_name}</h3></div><span className={present ? "presence on" : "presence"}>{present ? "在场" : "离场"}</span></div>
+              <p><b>剧情职责：</b>{item.data?.story_role?.purpose || "尚未填写"}</p>
+              <p><b>扮演指引：</b>{item.data?.roleplay?.roleplay_instructions || item.data?.roleplay?.combat_behavior || "尚未填写"}</p>
+              <p><b>计划行动：</b>{(item.data?.story_role?.planned_actions || []).join("；") || "无"}</p>
+              <p><b>战斗：</b>HP {item.data?.combat?.current_hp ?? "-"}/{item.data?.combat?.max_hp ?? "-"} · AC {item.data?.combat?.armor_class ?? "-"}</p>
+              <button className={present ? "danger" : ""} onClick={() => action(present ? "角色已离场" : "角色已加入场景", () => call(`/characters/${item.id}/presence`, { method: "PATCH", body: JSON.stringify({ present: !present, scene: "" }) }))}>{present ? "移出当前场景" : "加入当前场景"}</button>
+            </article>;
+          })}</div>
+        </section>
+        <aside className="panel content-panel">
+          <p className="label">CREATE DM ACTOR</p><h2>快速建立角色卡</h2>
+          <form className="stack-form" onSubmit={createActor}>
+            <label>类型<select value={actorKind} onChange={(e) => setActorKind(e.target.value)}><option value="npc">NPC</option><option value="monster">怪物</option></select></label>
+            <label>名称<input value={actorName} onChange={(e) => setActorName(e.target.value)} placeholder="例如：米拉 / 食人魔守卫"/></label>
+            <label>剧情职责<textarea value={actorPurpose} onChange={(e) => setActorPurpose(e.target.value)} placeholder="在设计好的剧情中要做什么"/></label>
+            <label>DM 扮演指引<textarea value={actorInstructions} onChange={(e) => setActorInstructions(e.target.value)} placeholder="语气、动机、秘密、战斗行为等"/></label>
+            <button disabled={busy || !actorName.trim()}>建立角色卡</button>
+          </form>
+          <p className="muted">建立后可通过角色卡 API 完整维护属性、技能、法术、物品、秘密、关系、触发条件与计划行动。</p>
         </aside>
       </section>}
 

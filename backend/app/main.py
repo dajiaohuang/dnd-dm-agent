@@ -14,7 +14,8 @@ from app.db.models import (Campaign, CampaignCheckpoint, CampaignEntity, Campaig
                            CampaignThread, Character, CharacterChange, CompendiumEntry, NapCatCharacterBinding)
 from app.schemas import (CampaignCreate, CampaignPatch, CharacterCreate, CharacterPatch,
                          CharacterBuildRequest, ChatRequest, DiceRequest, EventCreate,
-                         NapCatBindingUpsert, SettingDraftCreate, CampaignPackageImport, SettingCommentCreate)
+                         NapCatBindingUpsert, SettingDraftCreate, CampaignPackageImport, SettingCommentCreate,
+                         ActorRoleplayPatch, ActorPresencePatch)
 from app.services import (append_event, create_summary, ingest_compendium, ingest_rules,
                           search_rules, serialize, uid)
 from app.tools.dice import roll_dice
@@ -37,6 +38,7 @@ from app.campaign_editor import (
     discard_drafts, import_campaign_package, list_settings, publish_drafts, search_settings, setting_graph,
     setting_timeline, setting_to_npc_character, undo_latest_draft, validate_settings,
 )
+from app.actor_manager import list_actors, roleplay_brief, set_presence, update_roleplay
 
 
 @asynccontextmanager
@@ -277,6 +279,7 @@ def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
         "active_session_id": (campaign.config or {}).get("active_session_id"),
         "last_checkpoint_id": (campaign.config or {}).get("last_checkpoint_id"),
         "runtime_mode": runtime_mode(campaign),
+        "play_style": (campaign.config or {}).get("play_style", "campaign"),
         "turn_state": turn_state(campaign),
         "current_turn": current_turn(campaign),
     }
@@ -322,8 +325,8 @@ def get_campaign_setting(campaign_id: str, setting_id: str, db: Session = Depend
 @app.post("/campaigns/{campaign_id}/setting/{setting_id}/npc-character", status_code=201)
 def create_npc_from_setting(campaign_id: str, setting_id: str, db: Session = Depends(get_db)):
     item = db.get(CampaignSetting, setting_id)
-    if not item or item.campaign_id != campaign_id or item.category != "npc":
-        raise HTTPException(404, "Published NPC setting not found")
+    if not item or item.campaign_id != campaign_id or item.category not in {"npc", "monster"}:
+        raise HTTPException(404, "Published NPC or monster setting not found")
     return serialize(setting_to_npc_character(db, item))
 
 
@@ -520,6 +523,38 @@ def get_spell(spell_id: str):
 @app.get("/campaigns/{campaign_id}/characters")
 def list_characters(campaign_id: str, db: Session = Depends(get_db)):
     return [serialize(x) for x in db.scalars(select(Character).where(Character.campaign_id == campaign_id)).all()]
+
+
+@app.get("/campaigns/{campaign_id}/actors")
+def campaign_actors(campaign_id: str, actor_type: str | None = None, present: bool | None = None,
+                    db: Session = Depends(get_db)):
+    return [serialize(item) for item in list_actors(db, campaign_id, actor_type, present)]
+
+
+@app.get("/characters/{character_id}/roleplay")
+def get_actor_roleplay(character_id: str, db: Session = Depends(get_db)):
+    character = db.get(Character, character_id)
+    if not character:
+        raise HTTPException(404, "Character not found")
+    return roleplay_brief(character)
+
+
+@app.patch("/characters/{character_id}/roleplay")
+def patch_actor_roleplay(character_id: str, req: ActorRoleplayPatch, db: Session = Depends(get_db)):
+    character = db.get(Character, character_id)
+    if not character:
+        raise HTTPException(404, "Character not found")
+    update_roleplay(db, character, req.roleplay, req.story_role, req.encounter)
+    return serialize(character)
+
+
+@app.patch("/characters/{character_id}/presence")
+def patch_actor_presence(character_id: str, req: ActorPresencePatch, db: Session = Depends(get_db)):
+    character = db.get(Character, character_id)
+    if not character:
+        raise HTTPException(404, "Character not found")
+    set_presence(db, character, req.present, req.scene)
+    return serialize(character)
 
 
 @app.post("/campaigns/{campaign_id}/characters/inventory/normalize")

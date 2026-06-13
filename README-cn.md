@@ -56,6 +56,15 @@
 - 可将角色数据回填并导出为 Excel 人物卡。
 - 支持维护 QQ 用户与战役角色卡的绑定关系。
 
+### NPC、怪物与骰娘模式
+
+- NPC 和怪物与玩家复用同一套结构化角色卡，包括属性、战斗数值、法术、状态、物品、装备和修改历史。
+- DM 控制角色额外包含私密扮演资料：公开形象、说话方式、习惯、目标、恐惧、秘密、知识、态度与明确扮演指引。
+- 剧情职责记录 NPC 在设计好的战役中为何存在、计划执行什么、触发条件及关系。
+- 在场管理决定哪些 NPC 和怪物当前处于场景中，并参与战斗先攻。
+- 扮演阶段会把相关在场 DM 角色及私密指引注入 DM 推理；战斗阶段由 DM 操作其回合。
+- 骰娘模式禁用战役叙事、设定编辑、事件与记忆写入，但保留角色卡、物品、法术、检定、先攻、伤害、治疗和战斗回合辅助。
+
 所有物品只在 `character.data.inventory` 中保存一次。装备通过 `equipped` 和
 `equipped_slot` 表示；自定义物品可以将任意规则写入 `custom_data`，未知扩展字段也会原样保留。
 
@@ -317,6 +326,9 @@ uv run scripts/install_parse_backends.py --backend markitdown
 | 规则检索 | `GET /rules/search` |
 | 法术检索 | `GET /spells` |
 | 创建角色卡 | `POST /characters/build` |
+| NPC 与怪物角色卡 | `GET /campaigns/{campaign_id}/actors` |
+| DM 角色扮演资料 | `GET/PATCH /characters/{character_id}/roleplay` |
+| 角色在场状态 | `PATCH /characters/{character_id}/presence` |
 | 物品 Schema | `GET /characters/items/schema` |
 | 升级已有角色物品 | `POST /campaigns/{campaign_id}/characters/inventory/normalize` |
 | 导出人物卡 | `GET /characters/{character_id}/sheet` |
@@ -351,6 +363,8 @@ uv run scripts/install_parse_backends.py --backend markitdown
 /撤销修改      DM only
 /放弃编辑      DM only
 /退出编辑      DM only
+/骰娘          DM only
+/退出骰娘      DM only
 ```
 
 ## 测试

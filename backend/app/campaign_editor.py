@@ -37,7 +37,7 @@ def json_safe(value: Any) -> Any:
 
 
 SETTING_CATEGORIES = (
-    "campaign_pitch", "world_rule", "location", "faction", "npc", "history",
+    "campaign_pitch", "world_rule", "location", "faction", "npc", "monster", "history",
     "deity", "quest", "encounter", "custom",
 )
 TEMPLATES = {
@@ -331,10 +331,18 @@ def setting_to_npc_character(db: Session, setting: CampaignSetting) -> Character
     character = Character(
         id=uid("char"), campaign_id=setting.campaign_id, player_name="DM", character_name=setting.name,
         data={
-            "basic": {"name": setting.name, "actor_type": "npc"},
+            "basic": {"name": setting.name, "actor_type": content.get("actor_type", setting.category)},
             "abilities": abilities,
             "combat": content.get("combat") or {"armor_class": 10, "max_hp": 1, "current_hp": 1, "initiative": 0},
             "inventory": content.get("inventory") or [],
+            "roleplay": content.get("roleplay") or {
+                "public_persona": setting.summary, "voice": "", "mannerisms": [], "goals": [], "fears": [],
+                "secrets": [], "knowledge": [], "attitude": "", "roleplay_instructions": "",
+            },
+            "story_role": content.get("story_role") or {
+                "purpose": "", "planned_actions": [], "triggers": [], "relationships": setting.relationships,
+            },
+            "encounter": content.get("encounter") or {"present": False, "scene": ""},
             "conditions": [],
             "notes": {"campaign_setting_id": setting.id, "summary": setting.summary},
         },

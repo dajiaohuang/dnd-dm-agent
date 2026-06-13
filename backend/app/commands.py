@@ -42,6 +42,10 @@ EXPLICIT_COMMANDS = {
     "/撤销修改": "undo_setting_draft",
     "/undodraft": "undo_setting_draft",
     "/检查设定": "validate_settings",
+    "/骰娘": "enter_dice_assistant",
+    "/diceassistant": "enter_dice_assistant",
+    "/退出骰娘": "exit_dice_assistant",
+    "/exitdice": "exit_dice_assistant",
 }
 
 NATURAL_COMMANDS = {
@@ -75,6 +79,9 @@ NATURAL_COMMANDS = {
     "查看草稿": "list_setting_drafts",
     "撤销修改": "undo_setting_draft",
     "检查设定": "validate_settings",
+    "进入骰娘模式": "enter_dice_assistant",
+    "切换骰娘模式": "enter_dice_assistant",
+    "退出骰娘模式": "exit_dice_assistant",
 }
 
 

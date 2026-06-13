@@ -20,6 +20,7 @@ from app.tools.dice import roll_dice, roll_with_advantage
 from app.tools.spell_catalog import search_spells
 from app.tools.item_schema import CurrencyWallet, normalize_inventory
 from app.campaign_editor import search_settings, suggest_setting_updates_for_event
+from app.actor_manager import is_dm_actor, is_present, roleplay_brief
 
 
 def uid(prefix: str) -> str:
@@ -209,6 +210,11 @@ def build_dm_context(
     spells = search_spells(message, settings.data_dir, 3)
     memory_package = build_memory_package(db, campaign_id, message, session_id)
     campaign_settings = search_settings(db, campaign_id, message, 5)
+    dm_actors = [
+        roleplay_brief(item)
+        for item in db.scalars(select(Character).where(Character.campaign_id == campaign_id)).all()
+        if is_dm_actor(item) and is_present(item)
+    ]
     context = {
         "campaign": serialize(campaign) if campaign else None,
         "character": serialize(character) if character else None,
@@ -233,6 +239,7 @@ def build_dm_context(
             }
             for item in campaign_settings
         ],
+        "present_dm_actors": dm_actors,
         "relevant_rules": [
             {
                 "source": item.get("source"),
@@ -274,6 +281,7 @@ def build_dm_context(
         "rule_chunk_ids": [item.get("id") for item in rules if item.get("id")],
         "spell_ids": [item.get("id") for item in spells if item.get("id")],
         "campaign_setting_ids": [item.id for item in campaign_settings],
+        "present_dm_actor_ids": [item["id"] for item in dm_actors],
         "character_id": character.id if character else None,
         "character_version": character.version if character else None,
     }

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Campaign, Character, NapCatCharacterBinding
 from app.tools.dice import roll_dice
+from app.actor_manager import actor_type, is_present
 
 
 def runtime_mode(campaign: Campaign) -> str:
@@ -19,11 +20,6 @@ def turn_state(campaign: Campaign) -> dict:
 
 def is_combat(campaign: Campaign) -> bool:
     return bool(turn_state(campaign).get("combat"))
-
-
-def actor_type(character: Character) -> str:
-    basic = character.data.get("basic", {})
-    return "npc" if basic.get("actor_type") == "npc" or character.data.get("control") == "dm" else "player"
 
 
 def initiative_modifier(character: Character) -> int:
@@ -53,7 +49,10 @@ def _save(db: Session, campaign: Campaign, mode: str, state: dict) -> dict:
 
 
 def _characters(db: Session, campaign_id: str) -> list[Character]:
-    return db.scalars(select(Character).where(Character.campaign_id == campaign_id)).all()
+    return [
+        item for item in db.scalars(select(Character).where(Character.campaign_id == campaign_id)).all()
+        if is_present(item)
+    ]
 
 
 def enter_turn_mode(db: Session, campaign: Campaign) -> dict:
@@ -123,7 +122,7 @@ def turn_access(campaign: Campaign, character_id: str | None, is_dm: bool) -> tu
     current = current_turn(campaign)
     if not current:
         return False, "当前回合制没有参与角色。"
-    if current["actor_type"] == "npc":
+    if current["actor_type"] in {"npc", "monster"}:
         return (True, "") if is_dm else (False, f"当前是 NPC“{current['name']}”的回合，由 DM 操作。")
     if character_id == current["character_id"]:
         return True, ""

@@ -68,6 +68,9 @@ class CharacterBuildRequest(BaseModel):
     features: list[dict[str, Any]] = Field(default_factory=list)
     spells: list[Any] = Field(default_factory=list)
     notes: dict[str, Any] = Field(default_factory=dict)
+    roleplay: dict[str, Any] = Field(default_factory=dict)
+    story_role: dict[str, Any] = Field(default_factory=dict)
+    encounter: dict[str, Any] = Field(default_factory=dict)
 
 
 class NapCatBindingUpsert(BaseModel):
@@ -79,6 +82,17 @@ class NapCatBindingUpsert(BaseModel):
 
 class DiceRequest(BaseModel):
     formula: str
+
+
+class ActorRoleplayPatch(BaseModel):
+    roleplay: dict[str, Any] = Field(default_factory=dict)
+    story_role: dict[str, Any] = Field(default_factory=dict)
+    encounter: dict[str, Any] = Field(default_factory=dict)
+
+
+class ActorPresencePatch(BaseModel):
+    present: bool
+    scene: str = ""
 
 
 class ChatRequest(BaseModel):

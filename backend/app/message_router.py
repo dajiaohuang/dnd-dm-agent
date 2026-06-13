@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.campaign_control import campaign_status, command_result, execute_command
 from app.commands import route_command
 from app.config import settings
-from app.db.models import Campaign
+from app.db.models import Campaign, Character
 from app.services import resolve_chat
 from app.tools.spell_catalog import direct_spell_lookup, format_spell
 from app.campaign_memory import build_memory_package
@@ -13,6 +13,7 @@ from app.campaign_turns import (
     advance_turn, current_turn, format_turn_state, runtime_mode, turn_access, turn_notification,
 )
 from app.campaign_editor import editor_chat
+from app.dice_assistant import resolve_dice_assistant
 
 
 def process_message(
@@ -27,11 +28,15 @@ def process_message(
     compact = " ".join(message.strip().split())
     lowered = compact.casefold()
     if lowered.startswith(("/记忆", "/memory")):
+        if (campaign.config or {}).get("play_style") == "dice_assistant":
+            return command_result("memory", "骰娘模式不读取或管理战役记忆。", ok=False)
         query = compact.split(maxsplit=1)[1] if len(compact.split(maxsplit=1)) > 1 else compact
         package = build_memory_package(db, campaign.id, query, session_id)
         lines = [f"- [{item['type']}] {item['content']}" for item in package["memories"]]
         return command_result("memory", "\n".join(lines) or "当前还没有可用的结构化战役记忆。", data=package)
     if lowered in {"/剧情线", "/threads"}:
+        if (campaign.config or {}).get("play_style") == "dice_assistant":
+            return command_result("threads", "骰娘模式不读取或管理战役剧情线。", ok=False)
         package = build_memory_package(db, campaign.id, compact, session_id)
         lines = [f"- {item['title']}: {item['description']}" for item in package["threads"]]
         return command_result("threads", "\n".join(lines) or "当前没有开放的剧情线。", data=package)
@@ -55,6 +60,21 @@ def process_message(
             **command_result("spell_search", "\n\n".join(format_spell(spell) for spell in spells)),
             "data": {"query": spell_query, "spells": spells},
         }
+    if (campaign.config or {}).get("play_style") == "dice_assistant":
+        character = db.get(Character, character_id) if character_id else None
+        if runtime_mode(campaign) == "turn_based":
+            allowed, reason = turn_access(campaign, character_id, is_dm)
+            if not allowed:
+                return command_result("not_your_turn", reason, ok=False, data={"turn_state": format_turn_state(campaign)})
+            active_actor = current_turn(campaign)
+            if active_actor and active_actor["actor_type"] in {"npc", "monster"} and is_dm:
+                character = db.get(Character, active_actor["character_id"])
+            result = resolve_dice_assistant(db, campaign, character, message)
+            advance_turn(db, campaign)
+            result["turn_notification"] = turn_notification(db, campaign)
+            result["narration"] += f"\n\n{format_turn_state(campaign)}"
+            return result
+        return resolve_dice_assistant(db, campaign, character, message)
     if campaign_status(campaign) == "paused":
         return command_result(
             "paused",
@@ -66,7 +86,7 @@ def process_message(
         return command_result("not_your_turn", reason, ok=False, data={"turn_state": format_turn_state(campaign)})
     action_character_id = character_id
     active_actor = current_turn(campaign)
-    if active_actor and active_actor["actor_type"] == "npc" and is_dm:
+    if active_actor and active_actor["actor_type"] in {"npc", "monster"} and is_dm:
         action_character_id = active_actor["character_id"]
     result = resolve_chat(db, campaign.id, session_id, action_character_id, message)
     if runtime_mode(campaign) == "turn_based":

@@ -28,7 +28,7 @@ def build_character_data(raw: dict) -> dict:
     return {
         "basic": {
             "name": raw["character_name"],
-            "actor_type": "npc" if raw.get("actor_type") == "npc" else "player",
+            "actor_type": raw.get("actor_type") if raw.get("actor_type") in {"npc", "monster"} else "player",
             "ancestry": raw.get("ancestry", ""),
             "subrace": raw.get("subrace", ""),
             "background": raw.get("background", ""),
@@ -79,6 +79,9 @@ def build_character_data(raw: dict) -> dict:
             "flaws": raw.get("flaws", ""),
             "backstory": raw.get("backstory", ""),
         },
+        "roleplay": copy.deepcopy(raw.get("roleplay", {})),
+        "story_role": copy.deepcopy(raw.get("story_role", {})),
+        "encounter": {"present": True, **copy.deepcopy(raw.get("encounter", {}))},
         "conditions": [],
         "notes": copy.deepcopy(raw.get("notes", {})),
     }

@@ -20,7 +20,7 @@ from app.db.models import CampaignSettingDraft
 DM_ONLY_COMMANDS = {
     "save", "pause", "resume", "start_combat", "end_combat", "next_turn",
     "enter_campaign_edit", "exit_campaign_edit", "publish_settings", "discard_settings",
-    "undo_setting_draft",
+    "undo_setting_draft", "enter_dice_assistant", "exit_dice_assistant",
 }
 
 
@@ -34,6 +34,16 @@ def set_campaign_status(campaign: Campaign, status: str, session_id: str | None 
     if session_id:
         config["active_session_id"] = session_id
     campaign.config = config
+
+
+def play_style(campaign: Campaign) -> str:
+    return str((campaign.config or {}).get("play_style") or "campaign")
+
+
+def append_play_event(db: Session, campaign: Campaign, *args, **kwargs):
+    if play_style(campaign) == "dice_assistant":
+        return None
+    return append_event(db, campaign.id, *args, **kwargs)
 
 
 def create_checkpoint(
@@ -80,6 +90,16 @@ def execute_command(
 ) -> dict:
     if command.name in DM_ONLY_COMMANDS and not is_dm:
         return command_result(command.name, "该命令仅限 DM 使用。", ok=False)
+    campaign_only = {
+        "save", "pause", "resume", "enter_campaign_edit", "exit_campaign_edit", "publish_settings",
+        "discard_settings", "list_setting_drafts", "undo_setting_draft", "validate_settings",
+    }
+    if play_style(campaign) == "dice_assistant" and command.name in campaign_only:
+        return command_result(
+            command.name,
+            "骰娘模式不管理战役剧情、设定、事件或记忆。请先使用 /退出骰娘 返回战役叙事模式。",
+            ok=False,
+        )
 
     if command.name == "help":
         return command_result("help", (
@@ -100,6 +120,8 @@ def execute_command(
             "/查看草稿 - 查看当前待发布草稿\n"
             "/撤销修改 - 撤销最近草稿（DM）\n"
             "/检查设定 - 检查悬空引用与冲突\n"
+            "/骰娘 - 进入纯角色卡、检定与战斗计算辅助模式（DM）\n"
+            "/退出骰娘 - 返回战役叙事模式（DM）\n"
             "/法术 法术名 - 直接查询合并法术表"
         ))
 
@@ -111,13 +133,34 @@ def execute_command(
             f"状态：{campaign_status(campaign)}\n"
             f"当前会话：{config.get('active_session_id') or session_id or '无'}\n"
             f"最近检查点：{checkpoint}\n"
+            f"玩法：{'骰娘辅助' if play_style(campaign) == 'dice_assistant' else '战役叙事'}\n"
             f"{format_turn_state(campaign)}"
-        ), data={"status": campaign_status(campaign), "last_checkpoint_id": config.get("last_checkpoint_id")})
+        ), data={"status": campaign_status(campaign), "play_style": play_style(campaign),
+                 "last_checkpoint_id": config.get("last_checkpoint_id")})
+
+    if command.name == "enter_dice_assistant":
+        config = copy.deepcopy(campaign.config or {})
+        config["play_style"] = "dice_assistant"
+        if config.get("runtime_mode") == "campaign_edit":
+            config["runtime_mode"] = "free"
+        campaign.config = config
+        db.commit()
+        return command_result("enter_dice_assistant", (
+            "已进入骰娘模式。不会管理或推进战役剧情，也不会写入战役事件和记忆；"
+            "仍可管理角色卡、物品、检定、先攻、伤害、治疗和战斗回合。"
+        ))
+
+    if command.name == "exit_dice_assistant":
+        config = copy.deepcopy(campaign.config or {})
+        config["play_style"] = "campaign"
+        campaign.config = config
+        db.commit()
+        return command_result("exit_dice_assistant", "已退出骰娘模式，恢复战役叙事与记忆更新。")
 
     if command.name == "enter_turn_mode":
         state = enter_turn_mode(db, campaign)
         notification = turn_notification(db, campaign)
-        append_event(db, campaign.id, session_id, "turn_mode_entered", "进入回合模式", [], {"turn_state": state})
+        append_play_event(db, campaign, session_id, "turn_mode_entered", "进入回合模式", [], {"turn_state": state})
         return command_result(
             "enter_turn_mode",
             f"已进入回合制模式。\n{format_turn_state(campaign)}",
@@ -131,7 +174,7 @@ def execute_command(
                 "战斗进行中，不能退出回合模式。请由 DM 使用 /结束战斗。",
                 ok=False,
             )
-        append_event(db, campaign.id, session_id, "turn_mode_exited", "退出回合模式", [], {})
+        append_play_event(db, campaign, session_id, "turn_mode_exited", "退出回合模式", [], {})
         return command_result("exit_turn_mode", "已退出回合制模式，返回自由扮演模式。")
 
     if command.name == "start_combat":
@@ -143,7 +186,7 @@ def execute_command(
             f"{index + 1}. {item['name']}（{item['actor_type']}）：{item['initiative']['total']}"
             for index, item in enumerate(state["participants"])
         )
-        append_event(db, campaign.id, session_id, "combat_started", "进入战斗", [], {
+        append_play_event(db, campaign, session_id, "combat_started", "进入战斗", [], {
             "initiative_order": state["participants"],
         })
         return command_result(
@@ -154,13 +197,13 @@ def execute_command(
 
     if command.name == "end_combat":
         end_combat(db, campaign)
-        append_event(db, campaign.id, session_id, "combat_ended", "结束战斗", [], {})
+        append_play_event(db, campaign, session_id, "combat_ended", "结束战斗", [], {})
         return command_result("end_combat", "战斗结束，已自动退出回合制模式并返回自由扮演模式。")
 
     if command.name == "next_turn":
         next_actor = advance_turn(db, campaign)
         notification = turn_notification(db, campaign)
-        append_event(db, campaign.id, session_id, "turn_advanced", "下一回合", [], {
+        append_play_event(db, campaign, session_id, "turn_advanced", "下一回合", [], {
             "next_actor": next_actor,
         })
         return command_result(

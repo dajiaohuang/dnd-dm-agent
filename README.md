@@ -56,6 +56,15 @@ LangGraph orchestrates the DM reasoning phase, DeepSeek generates narrative resp
 - Exports character data back into an Excel character sheet.
 - Maintains QQ user-to-character bindings for each campaign.
 
+### NPC, Monster, and Dice Assistant Modes
+
+- NPCs and monsters use the same structured character-sheet foundation as players, including abilities, combat values, spells, conditions, inventory, equipment, and change history.
+- DM-controlled actors add private roleplay profiles: public persona, voice, mannerisms, goals, fears, secrets, knowledge, attitude, and explicit roleplay instructions.
+- Story-role fields describe why an NPC exists, planned actions in the designed campaign, triggers, and relationships.
+- Presence management determines which NPCs and monsters are currently in the scene and therefore included in initiative.
+- During roleplay, relevant present DM actors and their private instructions are injected into DM reasoning. During combat, their turns are operated by the DM.
+- Dice assistant mode disables campaign narration, setting edits, events, and memory writes while retaining character sheets, items, spells, checks, initiative, damage, healing, and combat turns.
+
 Every object is stored once in `character.data.inventory`. Equipped objects use `equipped` and
 `equipped_slot`; homebrew properties remain queryable through `custom_data` or additional fields.
 
@@ -317,6 +326,9 @@ uv run scripts/install_parse_backends.py --backend markitdown
 | Rule search | `GET /rules/search` |
 | Spell search | `GET /spells` |
 | Build a character | `POST /characters/build` |
+| NPC and monster cards | `GET /campaigns/{campaign_id}/actors` |
+| DM actor roleplay profile | `GET/PATCH /characters/{character_id}/roleplay` |
+| Actor scene presence | `PATCH /characters/{character_id}/presence` |
 | Item schema catalog | `GET /characters/items/schema` |
 | Normalize existing inventories | `POST /campaigns/{campaign_id}/characters/inventory/normalize` |
 | Export a character sheet | `GET /characters/{character_id}/sheet` |
@@ -351,6 +363,8 @@ uv run scripts/install_parse_backends.py --backend markitdown
 /undodraft           DM only
 /discardsettings     DM only
 /exitedit            DM only
+/diceassistant       DM only
+/exitdice            DM only
 ```
 
 Chinese command aliases such as `/帮助`, `/保存`, `/法术`, `/记忆`, and `/剧情线` are also supported.
