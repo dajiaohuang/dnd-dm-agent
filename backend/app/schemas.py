@@ -1,5 +1,6 @@
 from typing import Any
 from pydantic import BaseModel, Field
+from app.tools.item_schema import CharacterItem, CurrencyWallet
 
 
 class CampaignCreate(BaseModel):
@@ -61,7 +62,8 @@ class CharacterBuildRequest(BaseModel):
     tool_proficiencies: list[str] = Field(default_factory=list)
     weapon_proficiencies: list[str] = Field(default_factory=list)
     armor_proficiencies: list[str] = Field(default_factory=list)
-    inventory: list[dict[str, Any]] = Field(default_factory=list)
+    inventory: list[CharacterItem | dict[str, Any] | str] = Field(default_factory=list)
+    currency: CurrencyWallet | dict[str, Any] = Field(default_factory=CurrencyWallet)
     features: list[dict[str, Any]] = Field(default_factory=list)
     spells: list[Any] = Field(default_factory=list)
     notes: dict[str, Any] = Field(default_factory=dict)

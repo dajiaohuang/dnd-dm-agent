@@ -32,9 +32,29 @@ LangGraph orchestrates the DM reasoning phase, DeepSeek generates narrative resp
 
 - Creates structured DND 5E character sheets from API requests.
 - Implements point buy, ability modifiers, proficiency bonus, skills, saving throws, HP, AC, and spellcasting calculations extracted from an Excel character-sheet template.
-- Supports character versions, state-change history, inventory, spells, features, and background information.
+- Stores every carried or equipped object in a unified structured inventory, including weapons, armor, consumables, containers, charges, effects, currency, and arbitrary homebrew items.
+- Supports character versions, state-change history, spells, features, and background information.
 - Exports character data back into an Excel character sheet.
 - Maintains QQ user-to-character bindings for each campaign.
+
+Every object is stored once in `character.data.inventory`. Equipped objects use `equipped` and
+`equipped_slot`; homebrew properties remain queryable through `custom_data` or additional fields.
+
+```json
+{
+  "instance_id": "item_unique_instance",
+  "item_id": "clockwork_teapot",
+  "name": "Clockwork Grappling Teapot",
+  "item_type": "custom",
+  "quantity": 1,
+  "equipped": true,
+  "equipped_slot": "off_hand",
+  "weight_each": 2.5,
+  "charges": {"current": 2, "maximum": 3, "recharge": "dawn"},
+  "effects": [{"effect_type": "movement", "description": "Pulls the bearer 20 feet."}],
+  "custom_data": {"brew_temperature": 92, "experimental": true}
+}
+```
 
 ### Rulebooks, Spells, and Multi-file Parsing
 
@@ -261,6 +281,8 @@ uv run scripts/install_parse_backends.py --backend markitdown
 | Rule search | `GET /rules/search` |
 | Spell search | `GET /spells` |
 | Build a character | `POST /characters/build` |
+| Item schema catalog | `GET /characters/items/schema` |
+| Normalize existing inventories | `POST /campaigns/{campaign_id}/characters/inventory/normalize` |
 | Export a character sheet | `GET /characters/{character_id}/sheet` |
 | Campaign events | `GET /campaigns/{campaign_id}/events` |
 | Campaign memories | `GET /campaigns/{campaign_id}/memories` |

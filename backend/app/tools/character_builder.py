@@ -13,6 +13,7 @@ from app.tools.character_rules import (
     validate_character_rules,
 )
 from app.tools.spell_catalog import enrich_character_spells
+from app.tools.item_schema import normalize_inventory, CurrencyWallet
 
 ABILITY_CELLS = {"str": "E8", "dex": "E10", "con": "E12", "int": "E14", "wis": "E16", "cha": "E18"}
 
@@ -59,7 +60,8 @@ def build_character_data(raw: dict) -> dict:
             "weapons": list(raw.get("weapon_proficiencies", [])),
             "armor": list(raw.get("armor_proficiencies", [])),
         },
-        "inventory": copy.deepcopy(raw.get("inventory", [])),
+        "inventory": normalize_inventory(raw.get("inventory", [])),
+        "currency": CurrencyWallet.model_validate(raw.get("currency") or {}).model_dump(mode="json"),
         "features": copy.deepcopy(raw.get("features", [])),
         "spells": enrich_character_spells(copy.deepcopy(raw.get("spells", [])), settings.data_dir),
         "spellcasting": {

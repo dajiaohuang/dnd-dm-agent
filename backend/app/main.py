@@ -30,6 +30,7 @@ from app.tools.character_rules import (
     ABILITY_KEYS, CLASS_HIT_DICE, CLASS_SAVING_THROWS, POINT_BUY_COSTS, SKILL_ABILITIES,
 )
 from app.tools.spell_catalog import load_spell_catalog, search_spells
+from app.tools.item_schema import item_schema_catalog, normalize_character_inventory
 from app.campaign_memory import backfill_campaign_memory, search_campaign_memory
 
 
@@ -292,7 +293,9 @@ def patch_campaign(campaign_id: str, req: CampaignPatch, db: Session = Depends(g
 def create_character(req: CharacterCreate, db: Session = Depends(get_db)):
     if not db.get(Campaign, req.campaign_id):
         raise HTTPException(404, "Campaign not found")
-    character = Character(id=uid("char"), **req.model_dump())
+    payload = req.model_dump()
+    payload["data"] = normalize_character_inventory(payload["data"])
+    character = Character(id=uid("char"), **payload)
     db.add(character)
     db.commit()
     return serialize(character)
@@ -340,6 +343,11 @@ def character_rule_catalog():
     }
 
 
+@app.get("/characters/items/schema")
+def character_item_schema():
+    return item_schema_catalog()
+
+
 @app.get("/spells")
 def list_spells(
     query: str | None = None,
@@ -365,6 +373,28 @@ def get_spell(spell_id: str):
 @app.get("/campaigns/{campaign_id}/characters")
 def list_characters(campaign_id: str, db: Session = Depends(get_db)):
     return [serialize(x) for x in db.scalars(select(Character).where(Character.campaign_id == campaign_id)).all()]
+
+
+@app.post("/campaigns/{campaign_id}/characters/inventory/normalize")
+def normalize_campaign_character_inventories(campaign_id: str, db: Session = Depends(get_db)):
+    from app.services import update_character
+
+    if not db.get(Campaign, campaign_id):
+        raise HTTPException(404, "Campaign not found")
+    characters = db.scalars(select(Character).where(Character.campaign_id == campaign_id)).all()
+    updated = []
+    for character in characters:
+        normalized = normalize_character_inventory(character.data)
+        if normalized != character.data:
+            update_character(
+                db,
+                character,
+                {"inventory": normalized["inventory"], "currency": normalized["currency"]},
+                "normalized inventory to structured item schema",
+                "inventory_schema_migration",
+            )
+            updated.append(character.id)
+    return {"characters_scanned": len(characters), "characters_updated": len(updated), "character_ids": updated}
 
 
 @app.get("/characters/{character_id}")
@@ -558,12 +588,22 @@ def demo_bootstrap(db: Session = Depends(get_db)):
 
 
 def demo_character() -> dict:
-    return {
+    return normalize_character_inventory({
         "basic": {"name": "Aric", "ancestry": "Human", "classes": [{"name": "Fighter", "level": 3}]},
         "abilities": {"str": 16, "dex": 12, "con": 14, "int": 10, "wis": 11, "cha": 13},
         "combat": {"armor_class": 17, "max_hp": 28, "current_hp": 9, "temp_hp": 0, "proficiency_bonus": 2},
         "skills": {"persuasion": {"proficient": True, "expertise": False}},
-        "inventory": [{"item_id": "longsword", "name": "Longsword", "quantity": 1, "equipped": True},
-                      {"item_id": "potion_healing", "name": "Potion of Healing", "quantity": 2, "equipped": False}],
+        "inventory": [
+            {
+                "item_id": "longsword", "name": "Longsword", "item_type": "weapon", "quantity": 1,
+                "equipped": True, "equipped_slot": "main_hand",
+                "weapon": {"damage_dice": "1d8", "damage_type": "slashing", "versatile_damage": "1d10"},
+            },
+            {
+                "item_id": "potion_healing", "name": "Potion of Healing", "item_type": "consumable",
+                "quantity": 2, "consumable": {"consume_on_use": True, "activation": "action"},
+                "effects": [{"effect_type": "healing", "formula": "2d4+2"}],
+            },
+        ],
         "conditions": [], "notes": {},
-    }
+    })

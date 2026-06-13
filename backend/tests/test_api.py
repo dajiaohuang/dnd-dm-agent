@@ -88,6 +88,44 @@ def test_character_builder_and_template_export():
         )
 
 
+def test_character_item_schema_and_custom_inventory():
+    with TestClient(app) as client:
+        client.post("/demo/bootstrap")
+        schema = client.get("/characters/items/schema").json()
+        assert "custom" in schema["item_types"]
+        assert schema["storage_rule"].startswith("Every carried or equipped object")
+
+        result = client.post("/characters/build", json={
+            "campaign_id": "campaign_001",
+            "character_name": "Artificer",
+            "class_name": "Artificer",
+            "abilities": {"str": 8, "dex": 14, "con": 13, "int": 15, "wis": 12, "cha": 10},
+            "currency": {"gp": 21, "custom": {"guild_credit": 3}},
+            "inventory": [{
+                "name": "Clockwork Grappling Teapot",
+                "item_type": "custom",
+                "quantity": 1,
+                "equipped": True,
+                "equipped_slot": "off_hand",
+                "charges": {"current": 2, "maximum": 3, "recharge": "dawn"},
+                "effects": [{"effect_type": "movement", "description": "Pulls the bearer 20 feet."}],
+                "custom_data": {"brew_temperature": 92, "experimental": True},
+            }],
+        })
+        assert result.status_code == 201
+        data = result.json()["data"]
+        item = data["inventory"][0]
+        assert item["instance_id"].startswith("item_")
+        assert item["equipped_slot"] == "off_hand"
+        assert item["charges"]["maximum"] == 3
+        assert item["custom_data"]["brew_temperature"] == 92
+        assert data["currency"]["custom"]["guild_credit"] == 3
+
+        migration = client.post("/campaigns/campaign_001/characters/inventory/normalize").json()
+        assert migration["characters_scanned"] >= 2
+        assert "characters_updated" in migration
+
+
 def test_dm_reasoning_receives_campaign_memory(monkeypatch):
     captured = {}
 

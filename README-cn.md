@@ -32,9 +32,29 @@
 
 - 从结构化请求创建 DND 5E 角色卡。
 - 根据 Excel 人物卡模板提取并实现购点、属性调整值、熟练加值、技能、豁免、HP、AC 与施法属性规则。
-- 支持角色版本、状态修改日志、背包、法术、特性和背景资料。
+- 使用统一结构化背包保存全部携带物与装备，包括武器、护甲、消耗品、容器、充能、效果、货币和任意自定义物品。
+- 支持角色版本、状态修改日志、法术、特性和背景资料。
 - 可将角色数据回填并导出为 Excel 人物卡。
 - 支持维护 QQ 用户与战役角色卡的绑定关系。
+
+所有物品只在 `character.data.inventory` 中保存一次。装备通过 `equipped` 和
+`equipped_slot` 表示；自定义物品可以将任意规则写入 `custom_data`，未知扩展字段也会原样保留。
+
+```json
+{
+  "instance_id": "item_unique_instance",
+  "item_id": "clockwork_teapot",
+  "name": "发条抓钩茶壶",
+  "item_type": "custom",
+  "quantity": 1,
+  "equipped": true,
+  "equipped_slot": "off_hand",
+  "weight_each": 2.5,
+  "charges": {"current": 2, "maximum": 3, "recharge": "dawn"},
+  "effects": [{"effect_type": "movement", "description": "将持有者拉近 20 尺。"}],
+  "custom_data": {"brew_temperature": 92, "experimental": true}
+}
+```
 
 ### 规则书、法术与多文件解析
 
@@ -261,6 +281,8 @@ uv run scripts/install_parse_backends.py --backend markitdown
 | 规则检索 | `GET /rules/search` |
 | 法术检索 | `GET /spells` |
 | 创建角色卡 | `POST /characters/build` |
+| 物品 Schema | `GET /characters/items/schema` |
+| 升级已有角色物品 | `POST /campaigns/{campaign_id}/characters/inventory/normalize` |
 | 导出人物卡 | `GET /characters/{character_id}/sheet` |
 | 战役事件 | `GET /campaigns/{campaign_id}/events` |
 | 战役记忆 | `GET /campaigns/{campaign_id}/memories` |

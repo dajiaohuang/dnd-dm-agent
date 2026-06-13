@@ -18,6 +18,7 @@ from app.rag.embedder import embed_text, embed_texts
 from app.llm import chat_completion
 from app.tools.dice import roll_dice, roll_with_advantage
 from app.tools.spell_catalog import search_spells
+from app.tools.item_schema import CurrencyWallet, normalize_inventory
 
 
 def uid(prefix: str) -> str:
@@ -44,6 +45,11 @@ def merge_dict(base: dict, patch: dict) -> dict:
 def update_character(db: Session, character: Character, patch: dict, reason: str,
                      change_type: str = "character_update", rule_refs: list[str] | None = None) -> CharacterChange:
     before = copy.deepcopy(character.data)
+    patch = copy.deepcopy(patch)
+    if "inventory" in patch:
+        patch["inventory"] = normalize_inventory(patch["inventory"])
+    if "currency" in patch:
+        patch["currency"] = CurrencyWallet.model_validate(patch["currency"] or {}).model_dump(mode="json")
     after = merge_dict(before, patch)
     character.data = after
     character.version += 1
