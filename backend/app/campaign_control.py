@@ -129,6 +129,8 @@ def execute_command(
         checkpoint = config.get("last_checkpoint_id") or "无"
         return command_result("status", (
             f"战役：{campaign.name}\n"
+            f"简介：{campaign.description or '无'}\n"
+            f"当前场景：{config.get('scene') or '未记录'}\n"
             f"状态：{campaign_status(campaign)}\n"
             f"当前会话：{config.get('active_session_id') or session_id or '无'}\n"
             f"最近检查点：{checkpoint}\n"
@@ -145,7 +147,8 @@ def execute_command(
         campaign.config = config
         db.commit()
         return command_result("enter_dice_assistant", (
-            "已进入骰娘模式。不会代替真实 DM 推进预设剧情；会审计被 @ 的操作、在场角色、"
+            f"已在当前战役“{campaign.name}”中进入骰娘模式，战役进度、场景、背景、角色和记忆保持不变。"
+            "不会代替真实 DM 推进预设剧情；会审计被 @ 的操作、在场角色、"
             "检定和战斗，并维护可检索记忆。保留角色卡、规则、技能、法术、物品、先攻、"
             "伤害、治疗和战斗回合等全部工具能力，也可以自然提问。"
         ))

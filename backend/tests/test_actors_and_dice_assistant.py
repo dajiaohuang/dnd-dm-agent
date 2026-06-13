@@ -24,7 +24,10 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
     monkeypatch.setattr("app.services.chat_completion", fake_chat)
     monkeypatch.setattr("app.dice_assistant.chat_completion", fake_dice_chat)
     with TestClient(app) as client:
-        campaign = client.post("/campaigns", json={"name": "Actors and Dice"}).json()
+        campaign = client.post("/campaigns", json={
+            "name": "Actors and Dice", "description": "A campaign at the old inn.",
+            "config": {"scene": "Inn"},
+        }).json()
         campaign_id = campaign["id"]
         player = client.post("/characters/build", json={
             "campaign_id": campaign_id, "player_name": "Player", "character_name": "Hero",
@@ -103,6 +106,10 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
         assert "athletics +5" in capabilities["narration"]
         assert "Second Wind" in capabilities["narration"]
         assert "火球术" in capabilities["narration"]
+        client.post(f"/campaigns/{campaign_id}/events", json={
+            "session_id": "dice", "event_type": "dm_note", "content": "SECRET_DRAGON_PLAN",
+            "actors": [], "metadata": {}, "visibility": "dm_only",
+        })
         tool_answer = client.post(f"/chat/{campaign_id}", json={
             "session_id": "dice", "player_id": "player", "character_id": player["id"],
             "message": "运动检定应该加什么？",
@@ -113,6 +120,9 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
         assert "禁止推进或编造剧情" in dice_captured["system"]
         assert "roleplay_instructions" not in dice_captured["context"]
         assert "planned_actions" not in dice_captured["context"]
+        assert '"name": "Actors and Dice"' in dice_captured["context"]
+        assert '"scene": "Inn"' in dice_captured["context"]
+        assert "SECRET_DRAGON_PLAN" not in dice_captured["context"]
         potion_question = client.post(f"/chat/{campaign_id}", json={
             "session_id": "dice", "player_id": "player", "character_id": player["id"],
             "message": "治疗药水能恢复多少？",
@@ -139,6 +149,31 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
 
         setup = client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "开始战斗"}).json()
         assert "哪些角色参战" in setup["narration"]
+        status_during_setup = client.post(f"/chat/{campaign_id}", json={
+            "session_id": "dice", "message": "查看战役",
+        }).json()
+        assert status_during_setup["command"] == "status"
+        assert "Actors and Dice" in status_during_setup["narration"]
+        assert "当前场景：Inn" in status_during_setup["narration"]
+        not_started = client.post(f"/chat/{campaign_id}", json={
+            "session_id": "dice", "message": "角色：Hero、Mira、Ogre",
+        }).json()
+        assert not (not_started.get("data") or {}).get("turn_state")
+
+        client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "开始战斗"})
+        exited_pending_combat = client.post(f"/chat/{campaign_id}", json={
+            "session_id": "dice", "message": "退出战斗",
+        }).json()
+        assert exited_pending_combat["command"] == "end_combat"
+        assert not client.post(f"/chat/{campaign_id}", json={
+            "session_id": "dice", "message": "角色：Hero、Mira、Ogre",
+        }).json().get("data", {}).get("turn_state")
+
+        client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "开始战斗"})
+        question_during_setup = client.post(f"/chat/{campaign_id}", json={
+            "session_id": "dice", "message": "我现在在哪个战役？",
+        }).json()
+        assert "工具回答" in question_during_setup["narration"]
         started = client.post(f"/chat/{campaign_id}", json={
             "session_id": "dice", "message": "角色：Hero、Mira、Ogre；优势：Hero；劣势：Ogre",
         }).json()
@@ -147,5 +182,9 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
         assert modes == {"Hero": "advantage", "Mira": "normal", "Ogre": "disadvantage"}
         client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/endcombat"})
 
-        client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/exitdice"})
+        client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "开始战斗"})
+        exited_dice = client.post(f"/chat/{campaign_id}", json={
+            "session_id": "dice", "message": "退出骰娘模式",
+        }).json()
+        assert exited_dice["command"] == "exit_dice_assistant"
         assert client.get(f"/campaigns/{campaign_id}/status").json()["play_style"] == "campaign"

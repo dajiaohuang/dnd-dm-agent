@@ -155,7 +155,8 @@ def build_memory_package(
     return {
         "memories": [
             {"id": item.id, "type": item.memory_type, "subject": item.subject, "content": item.content,
-             "importance": item.importance, "tags": (item.structured_data or {}).get("tags", [])}
+             "importance": item.importance, "visibility": item.visibility,
+             "tags": (item.structured_data or {}).get("tags", [])}
             for item in memories
         ],
         "entities": [

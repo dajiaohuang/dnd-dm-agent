@@ -7,10 +7,11 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Campaign, Character
+from app.db.models import Campaign, CampaignEvent, CampaignSummary, Character
 from app.services import search_rules, update_character
 from app.llm import chat_completion
 from app.campaign_memory import build_memory_package
+from app.campaign_editor import search_settings
 from app.config import settings
 from app.tools.dice import roll_dice, roll_with_advantage
 from app.tools.spell_catalog import search_spells
@@ -57,6 +58,12 @@ def _save_state(db: Session, campaign: Campaign, state: dict) -> None:
     db.commit()
 
 
+def clear_dice_pending_state(db: Session, campaign: Campaign) -> None:
+    state = _state(campaign)
+    if state:
+        _save_state(db, campaign, {})
+
+
 def _yes(text: str) -> bool:
     words = {"是", "要", "好", "好的", "可以", "yes", "y", "读取", "讀取"}
     return any(token in words for token in text.casefold().split())
@@ -92,7 +99,7 @@ def dice_context_action(
             state.pop("pending_memory_history", None)
             _save_state(db, campaign, state)
             return _result("骰娘：好的，仅保留刚才被 @ / 引用的内容，不读取前文。")
-        return _result("骰娘：要读取前面的群聊记录来继续更新记忆吗？请回答“要”或“不要”。")
+        return None
 
     if any(term in lowered for term in ("更新记忆", "更新記憶", "记住", "記住", "记录一下", "記錄一下")):
         source = str(context.get("reply_text") or context.get("current_text") or text).strip()
@@ -104,14 +111,18 @@ def dice_context_action(
         return result
 
     if state.get("pending_combat_setup"):
+        if any(term in lowered for term in ("取消", "算了", "不打了", "退出战斗", "取消战斗", "cancel")):
+            state.pop("pending_combat_setup", None)
+            _save_state(db, campaign, state)
+            return _result("骰娘：已取消本次战斗准备，仍留在当前战役与骰娘模式中。")
         characters = [
             item for item in db.scalars(select(Character).where(Character.campaign_id == campaign.id)).all()
             if is_present(item)
         ]
         selected = [item for item in characters if item.character_name.casefold() in lowered]
-        if not selected:
-            names = "、".join(item.character_name for item in characters) or "（当前没有在场角色）"
-            return _result(f"骰娘：请说明参战角色。当前在场角色：{names}\n示例：角色：Aric、Goblin；优势：Aric；劣势：Goblin")
+        setup_markers = ("角色", "参战", "參戰", "优势", "優勢", "劣势", "劣勢", "participants")
+        if not selected or not any(marker in lowered for marker in setup_markers):
+            return None
         advantage_text = lowered.split("优势", 1)[1].split("；", 1)[0] if "优势" in lowered else ""
         disadvantage_text = lowered.split("劣势", 1)[1].split("；", 1)[0] if "劣势" in lowered else ""
         modes = {}
@@ -218,11 +229,25 @@ def resolve_dice_tool_question(
     }
     rules = search_rules(db, message, 4)
     spells = search_spells(message, settings.data_dir, 4)
-    memories = build_memory_package(db, campaign.id, message, limit=5)["memories"]
+    memory_package = build_memory_package(db, campaign.id, message, limit=5)
+    campaign_settings = search_settings(db, campaign.id, message, 8)
+    recent_events = db.scalars(
+        select(CampaignEvent).where(
+            CampaignEvent.campaign_id == campaign.id,
+            CampaignEvent.visibility != "dm_only",
+        )
+        .order_by(CampaignEvent.created_at.desc()).limit(12)
+    ).all()
+    summaries = db.scalars(
+        select(CampaignSummary).where(CampaignSummary.campaign_id == campaign.id)
+        .order_by(CampaignSummary.updated_at.desc()).limit(3)
+    ).all()
     present = [
         {
             "name": item.character_name,
             "actor_type": (item.data.get("basic") or {}).get("actor_type", "player"),
+            "basic": item.data.get("basic") or {},
+            "encounter": item.data.get("encounter") or {},
             "hp": (item.data.get("combat") or {}).get("current_hp"),
             "conditions": item.data.get("conditions") or [],
         }
@@ -230,6 +255,29 @@ def resolve_dice_tool_question(
         if is_present(item)
     ]
     context = {
+        "current_campaign": {
+            "id": campaign.id,
+            "name": campaign.name,
+            "description": campaign.description,
+            "system_version": campaign.system_version,
+            "current_state": campaign.config or {},
+        },
+        "recent_progress": [
+            {"type": item.event_type, "content": item.content, "metadata": item.event_metadata}
+            for item in reversed(recent_events)
+        ],
+        "campaign_summaries": [
+            {"scope": item.scope, "summary": item.summary, "open_threads": item.open_threads}
+            for item in summaries
+        ],
+        "relevant_campaign_settings": [
+            {
+                "category": item.category, "name": item.name, "summary": item.summary,
+                "content": item.content, "visibility": item.visibility,
+            }
+            for item in campaign_settings
+            if item.visibility != "dm_only"
+        ],
         "bound_character": mechanical_character or None,
         "present_actors": present,
         "relevant_rules": [
@@ -237,14 +285,18 @@ def resolve_dice_tool_question(
             for item in rules
         ],
         "relevant_spells": spells,
-        "relevant_audit_memory": memories,
+        "relevant_memory": [
+            item for item in memory_package["memories"] if item.get("visibility") != "dm_only"
+        ],
     }
     answer = chat_completion([
         {
             "role": "system",
             "content": (
                 "你是桌面跑团的工具型骰娘。自然、直接地回答规则、角色卡、技能、法术、物品、"
-                "检定、战斗计算和已记录事实问题。只能依据提供的机械数据和审计记忆回答。"
+                "检定、战斗计算，以及当前战役的进度、场景、背景、角色和已记录事实问题。"
+                "骰娘始终运行在 current_campaign 所指向的当前战役内，切换模式不会切换或清空战役。"
+                "只能依据提供的战役上下文、机械数据和记忆回答。"
                 "禁止推进或编造剧情，禁止描写周围环境，禁止扮演 NPC，禁止替真实 DM 决定结果。"
                 "信息不足时明确指出缺少什么。"
             ),

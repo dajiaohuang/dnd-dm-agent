@@ -13,7 +13,7 @@ from app.campaign_turns import (
     advance_turn, current_turn, format_turn_state, runtime_mode, turn_access, turn_notification,
 )
 from app.campaign_editor import editor_chat
-from app.dice_assistant import dice_context_action, resolve_dice_assistant
+from app.dice_assistant import clear_dice_pending_state, dice_context_action, resolve_dice_assistant
 from app.actor_manager import list_actors, is_present
 
 
@@ -35,16 +35,19 @@ def process_message(
         lines = [f"- [{item['type']}] {item['content']}" for item in package["memories"]]
         return command_result("memory", "\n".join(lines) or "当前还没有可用的结构化战役记忆。", data=package)
     if lowered in {"/剧情线", "/threads"}:
-        if (campaign.config or {}).get("play_style") == "dice_assistant":
-            return command_result("threads", "骰娘模式不读取或管理战役剧情线。", ok=False)
         package = build_memory_package(db, campaign.id, compact, session_id)
         lines = [f"- {item['title']}: {item['description']}" for item in package["threads"]]
         return command_result("threads", "\n".join(lines) or "当前没有开放的剧情线。", data=package)
-    if (campaign.config or {}).get("play_style") == "dice_assistant":
+    dice_mode = (campaign.config or {}).get("play_style") == "dice_assistant"
+    command = route_command(message)
+    if command and not (dice_mode and command.name == "start_combat"):
+        if dice_mode:
+            clear_dice_pending_state(db, campaign)
+        return execute_command(db, command, campaign, session_id, actor_id, is_dm)
+    if dice_mode:
         contextual = dice_context_action(db, campaign, message, message_context)
         if contextual:
             return audit_dice_result(db, campaign, session_id, character_id, actor_id, message, contextual, message_context)
-    command = route_command(message)
     if command:
         return execute_command(db, command, campaign, session_id, actor_id, is_dm)
     if runtime_mode(campaign) == "campaign_edit":
