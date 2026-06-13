@@ -140,7 +140,8 @@ def test_napcat_callback_to_dm(monkeypatch):
         })
         assert response.status_code == 200
         assert response.json()["parsed_attachments"]["success_count"] == 1
-        assert sent["user_id"] == 456
+        assert response.json()["reply"] == "ok"
+        assert not sent
         assert used["character_id"] == character["id"]
         assert used["actor_id"] == "456"
         assert not used["is_dm"]
@@ -180,4 +181,5 @@ def test_napcat_group_turn_notification_ats_bound_player(monkeypatch):
             "message": [{"type": "at", "data": {"qq": "123"}}, {"type": "text", "data": {"text": "next"}}],
         })
         assert response.status_code == 200
-        assert any(item[0] == "at" and item[1] == "456" for item in sent)
+        assert response.json()["reply"][1] == {"type": "at", "data": {"qq": "456"}}
+        assert not sent

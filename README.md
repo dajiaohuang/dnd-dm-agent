@@ -217,7 +217,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/ingest/rules
 run_webui.bat
 ```
 
-Open <http://127.0.0.1:3000>. The latest WebUI includes play and turn controls, conversational campaign editing, draft review, memory and story-thread views, rule/spell retrieval, and character status.
+Open <http://127.0.0.1:3001>. Port `3000` is reserved for the local NapCat OneBot HTTP service. The latest WebUI includes play and turn controls, conversational campaign editing, draft review, memory and story-thread views, rule/spell retrieval, and character status.
 
 ### Docker Compose
 

@@ -217,7 +217,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/ingest/rules
 run_webui.bat
 ```
 
-访问 <http://127.0.0.1:3000>。最新版 WebUI 包含游玩与回合控制、对话式战役编辑、草稿审阅、记忆与剧情线、规则/法术检索和角色状态。
+访问 <http://127.0.0.1:3001>。端口 `3000` 保留给本地 NapCat OneBot HTTP 服务。最新版 WebUI 包含游玩与回合控制、对话式战役编辑、草稿审阅、记忆与剧情线、规则/法术检索和角色状态。
 
 ### Docker Compose
 

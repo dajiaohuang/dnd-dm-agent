@@ -150,18 +150,23 @@ async def napcat_callback(
         db, campaign, session_id, character_id, text, actor_id=user_id, is_dm=is_dm_user(user_id)
     )
     answer = result["narration"]
+    reply: str | list[dict] = answer
     if payload.get("message_type") == "group":
-        client.send_group_msg(payload["group_id"], answer)
         notification = result.get("turn_notification") or result.get("data", {}).get("turn_notification")
         if notification and notification.get("qq_user_id"):
-            client.send_group_at(
-                payload["group_id"],
-                notification["qq_user_id"],
-                f"轮到你的角色“{notification['name']}”行动了。",
-            )
-    else:
-        client.send_private_msg(payload["user_id"], answer)
-    return {"ok": True, "result": result, "parsed_attachments": parsed, "attachment_errors": attachment_errors}
+            reply = [
+                {"type": "text", "data": {"text": f"{answer}\n\n"}},
+                {"type": "at", "data": {"qq": str(notification["qq_user_id"])}},
+                {"type": "text", "data": {"text": f" 轮到你的角色“{notification['name']}”行动了。"}},
+            ]
+    return {
+        "reply": reply,
+        "auto_escape": False,
+        "at_sender": False,
+        "result": result,
+        "parsed_attachments": parsed,
+        "attachment_errors": attachment_errors,
+    }
 
 
 @app.get("/napcat/bindings")

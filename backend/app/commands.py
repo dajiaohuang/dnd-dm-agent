@@ -81,6 +81,7 @@ NATURAL_COMMANDS = {
     "检查设定": "validate_settings",
     "进入骰娘模式": "enter_dice_assistant",
     "切换骰娘模式": "enter_dice_assistant",
+    "骰娘模式": "enter_dice_assistant",
     "退出骰娘模式": "exit_dice_assistant",
 }
 

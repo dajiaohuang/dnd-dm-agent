@@ -1,6 +1,11 @@
 from fastapi.testclient import TestClient
 
+from app.commands import route_command
 from app.main import app
+
+
+def test_dice_assistant_natural_command_alias():
+    assert route_command("骰娘模式").name == "enter_dice_assistant"
 
 
 def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):

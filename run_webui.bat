@@ -2,7 +2,7 @@
 setlocal
 set "ROOT=%~dp0"
 set "PORT=%~1"
-if "%PORT%"=="" set "PORT=3000"
+if "%PORT%"=="" set "PORT=3001"
 
 where npm >nul 2>nul
 if errorlevel 1 (
