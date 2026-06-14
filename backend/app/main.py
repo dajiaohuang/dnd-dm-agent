@@ -318,6 +318,7 @@ def get_campaign(campaign_id: str, db: Session = Depends(get_db)):
 def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
     from app.campaign_control import campaign_status
     from app.campaign_turns import current_turn, runtime_mode, turn_state
+    from app.combat_preferences import combat_preference, preference_style
     campaign = db.get(Campaign, campaign_id)
     if not campaign:
         raise HTTPException(404, "Campaign not found")
@@ -328,6 +329,9 @@ def get_campaign_status(campaign_id: str, db: Session = Depends(get_db)):
         "last_checkpoint_id": (campaign.config or {}).get("last_checkpoint_id"),
         "runtime_mode": runtime_mode(campaign),
         "play_style": (campaign.config or {}).get("play_style", "campaign"),
+        "combat_roleplay_enabled": combat_preference(campaign, "roleplay"),
+        "combat_advice_enabled": combat_preference(campaign, "advice"),
+        "combat_preference_style": preference_style(campaign),
         "turn_state": turn_state(campaign),
         "current_turn": current_turn(campaign),
     }

@@ -46,6 +46,10 @@ EXPLICIT_COMMANDS = {
     "/diceassistant": "enter_dice_assistant",
     "/退出骰娘": "exit_dice_assistant",
     "/exitdice": "exit_dice_assistant",
+    "/combatroleplayon": "enable_combat_roleplay",
+    "/combatroleplayoff": "disable_combat_roleplay",
+    "/combatadviceon": "enable_combat_advice",
+    "/combatadviceoff": "disable_combat_advice",
 }
 
 NATURAL_COMMANDS = {
@@ -88,6 +92,10 @@ NATURAL_COMMANDS = {
     "切换骰娘模式": "enter_dice_assistant",
     "骰娘模式": "enter_dice_assistant",
     "退出骰娘模式": "exit_dice_assistant",
+    "开启战斗扮演文字": "enable_combat_roleplay",
+    "关闭战斗扮演文字": "disable_combat_roleplay",
+    "开启战斗建议": "enable_combat_advice",
+    "关闭战斗建议": "disable_combat_advice",
 }
 
 

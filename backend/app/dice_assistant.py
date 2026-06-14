@@ -18,6 +18,7 @@ from app.tools.spell_catalog import search_spells
 from app.actor_manager import is_present
 from app.campaign_turns import format_turn_state, start_combat, turn_notification
 from app.qq_bindings import set_dice_dm_actor_bindings
+from app.combat_preferences import combat_preference
 
 ABILITY_ALIASES = {
     "力量": "str", "strength": "str", "str": "str",
@@ -39,11 +40,18 @@ SKILL_ALIASES = {
     "威吓": "intimidation", "威嚇": "intimidation", "intimidation": "intimidation",
     "奥秘": "arcana", "奧秘": "arcana", "arcana": "arcana",
 }
-FORBIDDEN_DICE_OUTPUT_TERMS = (
+ADVICE_OUTPUT_TERMS = (
     "建议", "推荐", "不妨", "可以尝试", "你可以选择", "下一步可以", "最好",
+)
+ROLEPLAY_OUTPUT_TERMS = (
     "你看到", "你听到", "周围", "映入眼帘", "空气中", "说道", "低语", "笑着",
     "扮演", "剧情继续", "故事继续",
 )
+ROLL_REQUEST_RE = re.compile(
+    r"(?i)(?:请|需要|进行|作出|make|please|must|need to|roll).{0,24}"
+    r"(?:掷骰|投掷|检定|豁免|攻击检定|roll|check|save|saving throw|attack roll)"
+)
+ROLL_FORMULA_RE = re.compile(r"(?i)(?<!\w)(\d*d\d+(?:\s*[+-]\s*\d+)?)(?!\w)")
 
 
 def _result(narration: str, rolls: list[dict] | None = None, changes: list[dict] | None = None) -> dict:
@@ -53,10 +61,42 @@ def _result(narration: str, rolls: list[dict] | None = None, changes: list[dict]
     }
 
 
-def strict_tool_output(text: str | None) -> str | None:
+def strict_tool_output(text: str | None, campaign: Campaign) -> str | None:
     if not text:
         return None
-    return None if any(term in text for term in FORBIDDEN_DICE_OUTPUT_TERMS) else text.strip()
+    forbidden = []
+    if not combat_preference(campaign, "advice"):
+        forbidden.extend(ADVICE_OUTPUT_TERMS)
+    if not combat_preference(campaign, "roleplay"):
+        forbidden.extend(ROLEPLAY_OUTPUT_TERMS)
+    return None if any(term in text for term in forbidden) else text.strip()
+
+
+def _dice_output_instructions(campaign: Campaign) -> str:
+    roleplay = combat_preference(campaign, "roleplay")
+    advice = combat_preference(campaign, "advice")
+    instructions = []
+    if roleplay:
+        instructions.append("战斗中可以附带简短的战斗扮演文字，但不得扮演 NPC 或推进剧情。")
+    else:
+        instructions.append("禁止任何扮演文字、气氛文字和环境描写。")
+    if advice:
+        instructions.append("战斗中可以回答用户明确询问的行动或策略建议。")
+    else:
+        instructions.append("禁止给出行动建议、策略建议或下一步建议。")
+    return "".join(instructions)
+
+
+def _automatic_tool_roll(text: str | None) -> tuple[str | None, dict | None]:
+    if not text or not ROLL_REQUEST_RE.search(text):
+        return text, None
+    formula = ROLL_FORMULA_RE.search(text)
+    roll = roll_dice(re.sub(r"\s+", "", formula.group(1)) if formula else "1d20")
+    resolved = (
+        f"{text}\n骰娘已自动投掷 {roll['formula']}：{roll['total']}"
+        f"（{roll['rolls']}，修正 {roll['modifier']:+d}）。"
+    )
+    return resolved, roll
 
 
 def _state(campaign: Campaign) -> dict:
@@ -322,6 +362,7 @@ def resolve_dice_tool_question(
             item for item in memory_package["memories"] if item.get("visibility") != "dm_only"
         ],
     }
+    output_instructions = _dice_output_instructions(campaign)
     answer = strict_tool_output(chat_completion([
         {
             "role": "system",
@@ -331,16 +372,17 @@ def resolve_dice_tool_question(
                 "骰娘始终运行在 current_campaign 所指向的当前战役内，切换模式不会切换或清空战役。"
                 "只能依据提供的战役上下文、机械数据和记忆回答。"
                 "只输出事实、数据、规则引用、计算结果、状态变更或必要的澄清问题。"
-                "禁止给出行动建议、策略建议或下一步建议。禁止任何扮演文字、气氛文字、环境描写、"
-                "NPC 台词和剧情续写。禁止推进或编造剧情，禁止替真实 DM 决定结果。"
+                f"{output_instructions}"
+                "始终禁止 NPC 台词和剧情续写。禁止推进或编造剧情，禁止替真实 DM 决定结果。"
                 "信息不足时只列出缺少的字段。"
             ),
         },
         {"role": "system", "content": json.dumps(context, ensure_ascii=False, default=str)},
         {"role": "user", "content": message},
-    ], temperature=0.2))
+    ], temperature=0.2), campaign)
     if answer:
-        return _result(answer)
+        answer, automatic_roll = _automatic_tool_roll(answer)
+        return _result(answer, [automatic_roll] if automatic_roll else [])
     if rules:
         excerpts = "\n\n".join(
             f"[{item.get('source')} / {item.get('section')}]\n{str(item.get('chunk_text') or '')[:800]}"

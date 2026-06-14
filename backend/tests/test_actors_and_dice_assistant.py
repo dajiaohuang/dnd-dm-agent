@@ -9,6 +9,54 @@ def test_dice_assistant_natural_command_alias():
     assert route_command("骰娘模式").name == "enter_dice_assistant"
 
 
+def test_dice_assistant_automatically_executes_requested_roll(monkeypatch):
+    monkeypatch.setattr(
+        "app.dice_assistant.chat_completion",
+        lambda *args, **kwargs: "Please roll 1d20+4 to make the check.",
+    )
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={
+            "name": "Dice Automatic Roll",
+            "config": {"play_style": "dice_assistant"},
+        }).json()
+        result = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "dice_auto", "message": "Resolve this unusual contest.",
+        }).json()
+        assert result["rolls"][0]["formula"] == "1d20+4"
+        assert "骰娘已自动投掷" in result["narration"]
+
+
+def test_dice_assistant_can_enable_combat_advice_and_roleplay(monkeypatch):
+    responses = iter([
+        "建议使用掩体。",
+        "火光映入眼帘，攻击命中。",
+    ])
+    monkeypatch.setattr(
+        "app.dice_assistant.chat_completion",
+        lambda *args, **kwargs: next(responses),
+    )
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={
+            "name": "Dice Optional Output",
+            "config": {"play_style": "dice_assistant"},
+        }).json()
+        client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "dice_optional", "message": "/combatadviceon",
+        })
+        client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "dice_optional", "message": "/combatroleplayon",
+        })
+
+        advice = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "dice_optional", "message": "How should this be handled?",
+        }).json()
+        roleplay = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "dice_optional", "message": "Describe the attack?",
+        }).json()
+        assert "建议使用掩体" in advice["narration"]
+        assert "火光映入眼帘" in roleplay["narration"]
+
+
 def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
     captured = {}
     dice_captured = {}

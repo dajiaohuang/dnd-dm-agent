@@ -21,6 +21,7 @@ from app.tools.spell_catalog import search_spells
 from app.tools.item_schema import CurrencyWallet, normalize_inventory
 from app.campaign_editor import search_settings, suggest_setting_updates_for_event
 from app.actor_manager import is_dm_actor, is_present, roleplay_brief
+from app.combat_preferences import combat_preference
 
 
 def uid(prefix: str) -> str:
@@ -175,6 +176,75 @@ def ability_modifier(score: int) -> int:
     return (score - 10) // 2
 
 
+ROLL_REQUEST_RE = re.compile(
+    r"(?i)(?:请|需要|进行|作出|make|please|must|need to|roll).{0,24}"
+    r"(?:掷骰|投掷|检定|豁免|攻击检定|roll|check|save|saving throw|attack roll)"
+)
+ROLL_FORMULA_RE = re.compile(r"(?i)(?<!\w)(\d*d\d+(?:\s*[+-]\s*\d+)?)(?!\w)")
+
+
+def _requested_roll(narration: str) -> str | None:
+    if not ROLL_REQUEST_RE.search(narration):
+        return None
+    match = ROLL_FORMULA_RE.search(narration)
+    return re.sub(r"\s+", "", match.group(1)) if match else "1d20"
+
+
+def _combat_output_instructions(campaign: Campaign) -> str:
+    if not bool(((campaign.config or {}).get("turn_state") or {}).get("combat")):
+        return ""
+    roleplay = combat_preference(campaign, "roleplay")
+    advice = combat_preference(campaign, "advice")
+    instructions = [
+        "Never ask a player to roll dice. Resolve every required roll immediately and continue the action.",
+    ]
+    if not roleplay:
+        instructions.append(
+            "Combat roleplay prose is disabled. Use a concise mechanical resolution without dialogue, "
+            "cinematic narration, atmosphere, or decorative action prose."
+        )
+    if not advice:
+        instructions.append(
+            "Combat advice is disabled. Do not suggest tactics, actions, targets, or next steps."
+        )
+    return " ".join(instructions)
+
+
+def _finish_requested_roll(
+    context_prompt: str,
+    message: str,
+    narration: str,
+    formula: str,
+    output_instructions: str = "",
+) -> tuple[str, dict]:
+    roll = roll_dice(formula)
+    continued = chat_completion([
+        {
+            "role": "system",
+            "content": (
+                "Continue and finish the pending DND action using the supplied automatic roll result. "
+                "Do not ask for another player roll. Do not invent unrecorded mechanical state changes. "
+                + output_instructions
+            ),
+        },
+        {"role": "system", "content": context_prompt},
+        {
+            "role": "user",
+            "content": (
+                f"Original action: {message}\n"
+                f"Pending resolution: {narration}\n"
+                f"Automatic roll: {json.dumps(roll, ensure_ascii=False)}\n"
+                "Finish resolving this action now."
+            ),
+        },
+    ])
+    fallback = (
+        f"{narration}\n系统已自动投掷 {roll['formula']}：{roll['total']}"
+        f"（{roll['rolls']}，修正 {roll['modifier']:+d}）。"
+    )
+    return continued or fallback, roll
+
+
 def build_dm_context(
     db: Session,
     campaign_id: str,
@@ -290,6 +360,7 @@ def build_dm_context(
 
 def resolve_chat(db: Session, campaign_id: str, session_id: str | None, character_id: str | None,
                  message: str) -> dict:
+    campaign = db.get(Campaign, campaign_id)
     character = db.get(Character, character_id) if character_id else None
     context_prompt, context_refs = build_dm_context(db, campaign_id, session_id, character, message)
     memory_package = build_memory_package(db, campaign_id, message, session_id)
@@ -344,14 +415,30 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
         changes = [{"type": "hp_change", "before": before_hp, "after": max_hp}]
         narration = f"休整结束，你重新振作起来。生命值恢复至 {max_hp}/{max_hp}。"
     else:
+        combat_instructions = _combat_output_instructions(campaign) if campaign else ""
         narration = chat_completion([
             {"role": "system", "content": (
                 "You are a concise DND Dungeon Master. Continue from established campaign memory. "
-                "Use the current character sheet and relevant rules. Do not invent mechanical state changes."
+                "Use the current character sheet and relevant rules. Do not invent mechanical state changes. "
+                "Never stop to ask a player to roll dice; state the required roll clearly so the system can "
+                f"roll it immediately and continue. {combat_instructions}"
             )},
             {"role": "system", "content": context_prompt},
             {"role": "user", "content": message},
-        ]) or "你的行动让局势继续向前推进。四周的目光落在你身上，等待你作出下一步选择。"
+        ]) or (
+            "行动已记录，未产生可确认的机械状态变化。"
+            if combat_instructions
+            else "你的行动让局势继续向前推进。四周的目光落在你身上，等待你作出下一步选择。"
+        )
+        requested_formula = _requested_roll(narration)
+        automatic_roll_count = 0
+        while requested_formula and automatic_roll_count < 4:
+            narration, automatic_roll = _finish_requested_roll(
+                context_prompt, message, narration, requested_formula, combat_instructions,
+            )
+            rolls.append(automatic_roll)
+            automatic_roll_count += 1
+            requested_formula = _requested_roll(narration)
 
     metadata = {"raw_player_input": message, "dm_response": narration, "rolls": rolls, "state_changes": changes,
                 "intent": graph_state.get("intent"), "ruling": graph_state.get("ruling"),

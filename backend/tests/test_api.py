@@ -37,6 +37,88 @@ def test_dice_validation():
         assert client.post("/dice/roll", json={"formula": "rm -rf"}).status_code == 400
 
 
+def test_combat_output_options_are_mode_specific():
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={"name": "Combat Options"}).json()
+        status = client.get(f"/campaigns/{campaign['id']}/status").json()
+        assert status["combat_preference_style"] == "campaign"
+        assert status["combat_roleplay_enabled"] is True
+        assert status["combat_advice_enabled"] is True
+
+        roleplay = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "options", "message": "/combatroleplayoff",
+        }).json()
+        advice = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "options", "message": "/combatadviceoff",
+        }).json()
+        assert roleplay["data"]["combat_roleplay_enabled"] is False
+        assert advice["data"]["combat_advice_enabled"] is False
+
+        client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "options", "message": "/diceassistant",
+        })
+        status = client.get(f"/campaigns/{campaign['id']}/status").json()
+        assert status["combat_preference_style"] == "dice_assistant"
+        assert status["combat_roleplay_enabled"] is False
+        assert status["combat_advice_enabled"] is False
+
+        client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "options", "message": "/combatroleplayon",
+        })
+        client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "options", "message": "/combatadviceon",
+        })
+        status = client.get(f"/campaigns/{campaign['id']}/status").json()
+        assert status["combat_roleplay_enabled"] is True
+        assert status["combat_advice_enabled"] is True
+
+        client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "options", "message": "/exitdice",
+        })
+        status = client.get(f"/campaigns/{campaign['id']}/status").json()
+        assert status["combat_preference_style"] == "campaign"
+        assert status["combat_roleplay_enabled"] is False
+        assert status["combat_advice_enabled"] is False
+
+
+def test_dm_automatically_rolls_and_continues_pending_action(monkeypatch):
+    calls = []
+
+    def fake_chat(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return "Please roll 1d20+5 to resolve the attack."
+        return "Attack total resolved; the action is complete."
+
+    monkeypatch.setattr("app.services.chat_completion", fake_chat)
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={
+            "name": "Automatic Roll",
+            "config": {
+                "campaign_combat_roleplay_enabled": False,
+                "campaign_combat_advice_enabled": False,
+                "turn_state": {"combat": True, "round": 1, "turn_index": 0, "participants": []},
+            },
+        }).json()
+        character = client.post("/characters", json={
+            "campaign_id": campaign["id"],
+            "character_name": "Hero",
+            "data": {"basic": {"actor_type": "player"}},
+        }).json()
+        result = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "automatic_roll",
+            "character_id": character["id"],
+            "message": "I attack the target.",
+        }).json()
+
+        assert result["narration"] == "Attack total resolved; the action is complete."
+        assert result["rolls"][0]["formula"] == "1d20+5"
+        assert len(calls) == 2
+        assert "Combat roleplay prose is disabled" in calls[0][0]["content"]
+        assert "Combat advice is disabled" in calls[0][0]["content"]
+        assert "Automatic roll" in calls[1][2]["content"]
+
+
 def test_qq_character_binding_crud():
     with TestClient(app) as client:
         client.post("/demo/bootstrap")

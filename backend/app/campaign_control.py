@@ -17,12 +17,15 @@ from app.campaign_editor import discard_drafts, publish_drafts, undo_latest_draf
 from app.db.models import CampaignSettingDraft
 from app.config import settings
 from app.qq_bindings import set_dice_dm_actor_bindings
+from app.combat_preferences import combat_preference, preference_style, set_combat_preference
 
 
 DM_ONLY_COMMANDS = {
     "save", "pause", "resume", "start_combat", "end_combat", "next_turn",
     "enter_campaign_edit", "exit_campaign_edit", "publish_settings", "discard_settings",
     "undo_setting_draft", "enter_dice_assistant", "exit_dice_assistant",
+    "enable_combat_roleplay", "disable_combat_roleplay",
+    "enable_combat_advice", "disable_combat_advice",
 }
 
 
@@ -123,6 +126,8 @@ def execute_command(
             "/检查设定 - 检查悬空引用与冲突\n"
             "/骰娘 - 进入纯角色卡、检定与战斗计算辅助模式（DM）\n"
             "/退出骰娘 - 返回战役叙事模式（DM）\n"
+            "/combatroleplayon|off - 开关当前玩法的战斗扮演文字（DM 模式默认开，骰娘默认关）\n"
+            "/combatadviceon|off - 开关当前玩法的战斗行动建议（DM 模式默认开，骰娘默认关）\n"
             "/法术 法术名 - 直接查询合并法术表"
         ))
 
@@ -137,9 +142,29 @@ def execute_command(
             f"当前会话：{config.get('active_session_id') or session_id or '无'}\n"
             f"最近检查点：{checkpoint}\n"
             f"玩法：{'骰娘辅助' if play_style(campaign) == 'dice_assistant' else '战役叙事'}\n"
+            f"战斗扮演文字：{'开启' if combat_preference(campaign, 'roleplay') else '关闭'}\n"
+            f"战斗建议：{'开启' if combat_preference(campaign, 'advice') else '关闭'}\n"
             f"{format_turn_state(campaign)}"
         ), data={"status": campaign_status(campaign), "play_style": play_style(campaign),
-                 "last_checkpoint_id": config.get("last_checkpoint_id")})
+                 "last_checkpoint_id": config.get("last_checkpoint_id"),
+                 "combat_roleplay_enabled": combat_preference(campaign, "roleplay"),
+                 "combat_advice_enabled": combat_preference(campaign, "advice"),
+                 "combat_preference_style": preference_style(campaign)})
+
+    behavior_commands = {
+        "enable_combat_roleplay": ("roleplay", True, "战斗扮演文字已开启。"),
+        "disable_combat_roleplay": ("roleplay", False, "战斗扮演文字已关闭。"),
+        "enable_combat_advice": ("advice", True, "战斗建议已开启。"),
+        "disable_combat_advice": ("advice", False, "战斗建议已关闭。"),
+    }
+    if command.name in behavior_commands:
+        option, enabled, narration = behavior_commands[command.name]
+        key = set_combat_preference(db, campaign, option, enabled)
+        return command_result(command.name, narration, data={
+            "combat_preference_style": preference_style(campaign),
+            f"combat_{option}_enabled": enabled,
+            "config_key": key,
+        })
 
     if command.name == "enter_dice_assistant":
         config = copy.deepcopy(campaign.config or {})
