@@ -2,117 +2,120 @@
 
 # DND DM Agent
 
-A local-first AI Dungeon Master system designed for long-running DND campaigns.
+A local-first AI tabletop system for long-running DND campaigns. It provides both a complete
+**DM Mode** and a tool-focused **Dice Assistant Mode**. Both modes operate on the same campaign,
+characters, memories, and combat state, and may be switched without losing progress.
 
-It does more than generate DM narration. The system maintains character sheets, campaign events, structured memories, story threads, rulebooks, spell catalogs, and checkpoints, while supporting QQ group and private chat through NapCat.
+The project treats play as persistent structured state rather than disposable chat. Character sheets,
+NPCs, monsters, items, effects, campaign settings, plot progress, events, memories, and combat state are
+queryable and auditable data. The LLM handles natural-language understanding, narration, and roleplay;
+deterministic Python tools handle rolls, calculations, state changes, and persistence.
 
-LangGraph orchestrates the DM reasoning phase, DeepSeek generates narrative responses, and a local BGE-M3 model retrieves rules and campaign memories. Deterministic Python tools execute important state changes, so the LLM never modifies canonical game state directly.
+## Two Play Modes
 
-## Core Capabilities
+### DM Mode
 
-### Persistent Campaign Memory
+DM Mode lets the AI host a complete campaign as the Dungeon Master.
 
-- Preserves the complete campaign history as an append-only event log.
-- Automatically extracts structured memories, participating entities, and open story threads from new events.
-- Retrieves memories using BGE-M3 semantic similarity, keywords, importance, and current-session relevance.
-- Injects relevant memories, entity state, story threads, summaries, and recent events into DM reasoning.
-- Supports incremental and idempotent backfilling of memory from existing campaign events.
-- Compresses long sessions with summaries and saves campaign plus character state through checkpoints.
+- Advances established plots from the current scene, campaign canon, historical events, and player actions.
+- Describes environments and outcomes while portraying present NPCs and monsters.
+- Reads private NPC profiles, secrets, motivations, voices, story responsibilities, and planned actions.
+- Retrieves rulebooks, spells, character sheets, campaign settings, and memories while resolving actions.
+- Records events, character changes, story threads, and structured memory for long-running continuity.
+- Uses exactly the same deterministic combat mechanics as Dice Assistant Mode while retaining narration, NPC roleplay, and plot presentation.
 
-### Conversational Campaign Editor
+### Dice Assistant Mode
 
-- Provides a DM-only campaign edit mode that is isolated from normal play and does not advance turns or write gameplay events.
-- Uses an independent LangGraph workflow to classify editing intent, retrieve related settings, generate proposals, and validate them.
-- Stores locations, NPCs, factions, lore, quests, timeline entries, rules, and arbitrary homebrew settings as structured records.
-- Keeps proposed changes in drafts until the DM publishes them; drafts can be reviewed, commented on, resolved, undone, or discarded.
-- Preserves an auditable version history for every published change and validates broken relationships or duplicate settings.
-- Retrieves relevant published settings into normal DM reasoning and creates review drafts when new events appear to contradict established canon.
-- Exposes relationship graphs, timelines, starter templates, NPC conversion, and portable campaign package import/export.
+Dice Assistant Mode supports real players and a real DM. It does not proactively advance a plot,
+describe environments, or portray NPCs, but retains the full tabletop toolset.
 
-### Free-play and Turn-based Modes
+- Answers questions about character sheets, abilities, spells, rules, items, campaign progress, and recorded facts.
+- Executes checks, rolls, damage, healing, item use, effects, and combat hosting.
+- Remains inside the current campaign and continues using its scene, public settings, actors, and memories.
+- Audits mentioned operations and present actors, and can update memory from current, replied-to, or confirmed earlier messages.
+- Outputs facts, rules, calculations, state changes, and necessary clarification only, without unsolicited advice or roleplay prose.
 
-- Campaigns default to free-play mode and may switch to turn-based mode through chat commands.
-- Starting combat rolls initiative for every player character and NPC, then forces turn-based mode.
-- NPC turns are controlled by the DM; player turns only accept actions from the bound character.
-- After each valid action, the system advances the turn and mentions the next player through NapCat.
-- Non-combat turn-based mode may be exited manually. Combat cannot exit turn-based mode until combat ends.
-- Ending combat automatically returns the campaign to free-play mode.
+## DM Campaign System
 
-### Auditable DM Reasoning
+### Campaign Progression and Long-term Memory
 
-- LangGraph runs memory retrieval, intent parsing, rules arbitration, and action planning.
-- Recognizes character, combat, social, rest, inventory, and spellcasting actions.
-- Executes dice rolls, healing, item consumption, and character updates through deterministic tools.
-- Records every character modification in a change log and every action in the campaign event log.
-- Stores the rules, spells, memories, summaries, character version, and graph plan used for each event.
-- Keeps deterministic tools and fallback responses available when DeepSeek is not configured or temporarily unavailable.
+Every action and result is stored in an event log. Events feed structured memories, entity state,
+open story threads, and summaries. DM reasoning retrieves the facts and relationships relevant to the
+current scene instead of relying only on the latest chat messages.
 
-### Character Creation and Sheets
+- Supports free play, non-combat turn order, and combat turn order.
+- Supports pause, resume, checkpoints, and full campaign-state recovery.
+- Uses local BGE-M3 retrieval for rulebooks and campaign memory.
+- Writes every character mutation to a change log and every action to a campaign event.
+- Records relevant rules, spells, memories, character versions, rolls, and state changes for auditing.
 
-- Creates structured DND 5E character sheets from API requests.
-- Implements point buy, ability modifiers, proficiency bonus, skills, saving throws, HP, AC, and spellcasting calculations extracted from an Excel character-sheet template.
-- Stores every carried or equipped object in a unified structured inventory, including weapons, armor, consumables, containers, charges, effects, currency, and arbitrary homebrew items.
-- Resolves base character data plus persistent, equipped, scene, and combat-only effects into a single effective mechanical snapshot.
-- Supports effect duration ticks, stacking groups, concentration replacement/checks, advantage/disadvantage, bonus dice, and on-roll consumption.
-- Supports character versions, state-change history, spells, features, and background information.
-- Exports character data back into an Excel character sheet.
-- Maintains QQ user-to-character bindings for each campaign.
-- QQ bindings are campaign-specific. Switching campaigns in the WebUI also switches NapCat's active campaign and the character bound to each QQ user there.
-- Character cards expose bound accounts in `data.integrations.qq_user_ids`; they can be edited in the WebUI or through `PATCH /characters/{id}/qq-bindings`, and deleting a character removes its bindings.
+### Conversational Campaign Editing
 
-### NPC, Monster, and Dice Assistant Modes
+DMs can enter an isolated editing mode to create or revise locations, NPCs, factions, lore, quests,
+timelines, rules, and arbitrary homebrew settings without advancing play.
 
-- NPCs and monsters use the same structured character-sheet foundation as players, including abilities, combat values, spells, conditions, inventory, equipment, and change history.
-- DM-controlled actors add private roleplay profiles: public persona, voice, mannerisms, goals, fears, secrets, knowledge, attitude, and explicit roleplay instructions.
-- Story-role fields describe why an NPC exists, planned actions in the designed campaign, triggers, and relationships.
-- Presence management determines which NPCs and monsters are currently in the scene and therefore included in initiative.
-- During roleplay, relevant present DM actors and their private instructions are injected into DM reasoning. During combat, their turns are operated by the DM.
-- Dice assistant mode does not replace the real DM or advance a preset plot, but it continuously audits mentioned operations and present actors while maintaining searchable memory.
-- When mentioned to update memory, it reads the current or replied-to message by default and asks whether it should also ingest earlier group-chat history.
-- When mentioned to start combat, it asks for participants and initiative advantage/disadvantage, rolls initiative, and hosts turns using the DM-mode combat flow.
-- Dice assistant mode only disables proactive plot advancement, environment narration, and NPC roleplay. All tool capabilities remain available through natural-language questions, including character sheets, rules, skills, spells, items, memory, checks, damage, healing, and combat.
-- DM mode and dice assistant mode share the same deterministic combat pipeline, participant cards, effects, reactions, rolls, and turn handling. DM mode additionally receives private campaign context and may narrate scenes, portray NPCs, and express established plot developments.
-- Dice assistant output is restricted to facts, rules, data, calculations, state changes, and necessary clarification questions. It gives no action advice and produces no roleplay, atmosphere, environment narration, or NPC dialogue.
-- Entering dice assistant mode temporarily associates every NPC and monster in the current campaign with the DM QQ account. If the DM cannot be identified uniquely, the assistant asks first. Exiting removes these temporary associations without changing player bindings.
-- Switching from DM mode to dice assistant mode keeps the same campaign. Its progress, scene, background, public settings, actors, and memory remain available as tool-question context.
-- Pending prompts such as combat participants or history confirmation never lock the conversation; combat exit, dice-mode exit, campaign status, other commands, and ordinary questions can interrupt them.
-- Example questions include “What abilities can I use?”, “What does Fireball do?”, and “What is my Athletics bonus?” Campaign-setting edits still require campaign narration mode.
+- Changes begin as drafts and are published only after review.
+- Supports comments, undo, discard, conflict validation, and version history.
+- Provides relationship graphs, timelines, starter templates, NPC conversion, and campaign package import/export.
+- Published settings are retrieved during play, and contradictory events may create review drafts.
 
-Every object is stored once in `character.data.inventory`. Equipped objects use `equipped` and
-`equipped_slot`; homebrew properties remain queryable through `custom_data` or additional fields.
+### NPCs and Monsters
 
-```json
-{
-  "instance_id": "item_unique_instance",
-  "item_id": "clockwork_teapot",
-  "name": "Clockwork Grappling Teapot",
-  "item_type": "custom",
-  "quantity": 1,
-  "equipped": true,
-  "equipped_slot": "off_hand",
-  "weight_each": 2.5,
-  "charges": {"current": 2, "maximum": 3, "recharge": "dawn"},
-  "effects": [{"effect_type": "movement", "description": "Pulls the bearer 20 feet."}],
-  "custom_data": {"brew_temperature": 92, "experimental": true}
-}
-```
+NPCs and monsters use the same structured character and combat foundation as players. They additionally
+store private DM material such as persona, voice, mannerisms, goals, fears, secrets, knowledge, attitude,
+roleplay instructions, story responsibilities, triggers, and planned actions. Presence state determines
+which actors exist in the current scene and enter initiative.
 
-### Rulebooks, Spells, and Multi-file Parsing
+## Shared Combat System
+
+DM Mode and Dice Assistant Mode use the same combat mechanics pipeline. Initiative, participant cards,
+target resolution, reactions, rolls, effects, and turn advancement behave identically. The only
+difference is that DM Mode may add narration and roleplay.
+
+### Turns and Participants
+
+- Combat begins only after confirming participants; actors without entity character sheets cannot enter.
+- The system rolls initiative for every participating player, NPC, and monster.
+- The current turn accepts actions only from the appropriate player or DM.
+- NapCat mentions the QQ user bound to a player character when their turn begins.
+- Turns advance only after resolution, and ending combat returns the campaign to free play.
+
+### Character and Target Mechanics
+
+- Every combat action receives cropped mechanical cards for all participants and a focused target-card set.
+- AC, HP, modifiers, skills, saves, initiative, and spellcasting values must come from entity character sheets, never guessed chat values.
+- Players, NPCs, and monsters share the same schema for sheets, items, spells, effects, and change history.
+- QQ character bindings are campaign-specific and switch with the active campaign.
+
+### Effects and Reactions
+
+- Equipment, buffs, debuffs, spells, and homebrew items generate a live `effective` mechanical snapshot without overwriting base stats.
+- Supports duration ticks, stacking, concentration, advantage/disadvantage, bonus dice, consumption, and combat-end cleanup.
+- Actions that may trigger reactions are announced before any roll result is shown.
+- Eligible players are mentioned and asked for a decision; automated actors also explicitly decide whether to react.
+- Rolls, resolution, and turn advancement occur only after every reaction decision is complete.
+
+## Supporting Capabilities
+
+### Character Sheets, Items, and Creation
+
+- Implements point buy, modifiers, proficiency, skills, saves, HP, AC, and spellcasting formulas extracted from the Excel sheet template.
+- Stores weapons, armor, consumables, containers, charges, currency, equipment effects, and arbitrary homebrew items structurally.
+- Supports character versions, change history, Excel export, and per-campaign QQ bindings.
+
+### Rules, Spells, and Multi-file Parsing
 
 - Parses text, Markdown, JSON, CSV, HTML, DOCX, PPTX, PDF, and ZIP files.
-- Supports optional PaddleOCR, PDF OCR, Whisper, and MarkItDown backends.
-- Chunks parsed rulebooks and indexes them with local BGE-M3 embeddings.
-- Merges multiple Excel spell lists and supports Chinese names, English names, keywords, and natural-language spell lookup.
-- Automatically adds relevant spell entries to DM context during spellcasting actions.
+- Indexes rulebooks and campaign memory with local BGE-M3 embeddings.
+- Merges multiple Excel spell lists and supports bilingual names, keyword lookup, and natural-language queries.
+- Injects matching rules and spell entries into relevant actions.
 
-### QQ and NapCat Integration
+### QQ and NapCat
 
-- Supports NapCat / OneBot v11 private and group messages.
-- Group messages trigger only when the bot is mentioned by default; private messages trigger directly.
-- An empty allowlist permits all users.
-- Downloads and parses attachments sent through QQ.
-- Separates DM control permissions from regular player permissions.
-- Includes Windows launch, login, and QQ character-binding scripts.
+- Supports OneBot v11 group and private messages; group messages require mentioning the bot by default.
+- Supports replies, confirmed group history, attachment downloads, and multi-file parsing.
+- An empty allowlist permits all users while DM permissions remain separate from player permissions.
+- Includes Windows launch, login, and character-binding scripts.
 
 ## LangGraph Reasoning Flow
 
