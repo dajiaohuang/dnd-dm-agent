@@ -90,3 +90,36 @@ def create_task(
     )
     db.add(item)
     return item
+
+
+def create_subagent_proposal(
+    db: Session,
+    campaign: Campaign,
+    parent: TaskSession,
+    *,
+    agent_role: str,
+    goal: str,
+    proposal: dict[str, Any] | None = None,
+    next_prompt: str = "请审核子任务提案。",
+) -> TaskSession:
+    item = TaskSession(
+        id=uid("task"),
+        campaign_id=campaign.id,
+        task_type="subagent_proposal",
+        platform=parent.platform,
+        chat_id=parent.chat_id,
+        owner_user_id=parent.owner_user_id,
+        session_id=parent.session_id,
+        status="ready_to_commit",
+        priority=parent.priority,
+        proposal_data={
+            "agent_role": agent_role,
+            "goal": goal,
+            "proposal": proposal or {},
+        },
+        next_prompt=next_prompt,
+        mentions=owner_mentions(parent.owner_user_id, next_prompt),
+        parent_task_id=parent.id,
+    )
+    db.add(item)
+    return item

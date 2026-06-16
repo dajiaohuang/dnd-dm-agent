@@ -236,6 +236,29 @@ def test_napcat_group_generic_task_mentions(monkeypatch):
         assert "请补充你的车卡" in reply[2]["data"]["text"]
 
 
+def test_napcat_campaign_edit_task_keeps_platform_scope(monkeypatch):
+    class FakeClient:
+        self_id = "123"
+
+    monkeypatch.setattr("app.main.NapCatClient.from_settings", lambda: FakeClient())
+    monkeypatch.setattr("app.main.download_attachments", lambda client, payload: (Path(tempfile.mkdtemp()), [], []))
+    monkeypatch.setattr(settings, "napcat_campaign_id", "campaign_001")
+    monkeypatch.setattr(settings, "napcat_token", "")
+    monkeypatch.setattr(settings, "napcat_dm_user_ids", "456")
+
+    with TestClient(app) as client:
+        client.post("/demo/bootstrap")
+        response = client.post("/napcat/callback", json={
+            "post_type": "message", "message_type": "group", "group_id": 88, "user_id": 456,
+            "message": [{"type": "at", "data": {"qq": "123"}}, {"type": "text", "data": {"text": "/editcampaign"}}],
+        })
+        assert response.status_code == 200
+        tasks = client.get("/campaigns/campaign_001/tasks", params={"task_type": "campaign_edit"}).json()
+        assert tasks[0]["platform"] == "napcat"
+        assert tasks[0]["chat_id"] == "88"
+        assert tasks[0]["owner_user_id"] == "456"
+
+
 def test_napcat_active_campaign_switches_bound_character(monkeypatch):
     used = {}
 

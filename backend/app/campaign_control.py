@@ -100,6 +100,7 @@ def execute_command(
     session_id: str | None,
     actor_id: str | None,
     is_dm: bool,
+    message_context: dict | None = None,
 ) -> dict:
     if command.name in DM_ONLY_COMMANDS and command.name != "enter_dice_assistant" and not is_dm:
         return command_result(command.name, "该命令仅限 DM 使用。", ok=False)
@@ -272,7 +273,7 @@ def execute_command(
 
     if command.name == "enter_campaign_edit":
         platform, chat_id, owner_user_id, scoped_session = task_scope(
-            {"platform": "web"},
+            message_context or {"platform": "web"},
             actor_id,
             session_id,
         )

@@ -247,6 +247,40 @@ def test_parallel_character_build_sessions_do_not_cross_talk():
         assert alice_submit["data"]["character"]["data"]["abilities"]["int"] == 16
         assert bob_submit["data"]["character"]["data"]["abilities"]["str"] == 16
 
+        tasks = client.get(f"/campaigns/{campaign['id']}/tasks", params={"status": "committed"}).json()
+        committed_builds = [item for item in tasks if item["task_type"] == "character_build"]
+        assert {item["owner_user_id"] for item in committed_builds} >= {"alice", "bob"}
+
+
+def test_task_session_api_supports_subtask_lifecycle():
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={"name": "Task API"}).json()
+        parent = client.post(f"/campaigns/{campaign['id']}/tasks", json={
+            "task_type": "campaign_edit",
+            "owner_user_id": "dm",
+            "session_id": "edit",
+            "proposal_data": {"goal": "create city"},
+        }).json()
+        child = client.post(f"/campaigns/{campaign['id']}/tasks", json={
+            "task_type": "subagent_proposal",
+            "owner_user_id": "dm",
+            "session_id": "edit",
+            "parent_task_id": parent["id"],
+            "proposal_data": {"agent_role": "npc_designer", "goal": "draft harbor NPCs"},
+            "next_prompt": "Review NPC proposal.",
+        }).json()
+        assert child["parent_task_id"] == parent["id"]
+        active = client.get(f"/campaigns/{campaign['id']}/tasks").json()
+        assert {item["id"] for item in active} >= {parent["id"], child["id"]}
+        committed = client.patch(f"/campaigns/{campaign['id']}/tasks/{child['id']}", json={
+            "status": "committed",
+            "created_object_type": "campaign_setting",
+            "created_object_id": "setting_123",
+        }).json()
+        assert committed["status"] == "committed"
+        assert committed["created_object_id"] == "setting_123"
+        assert not any(item["id"] == child["id"] for item in client.get(f"/campaigns/{campaign['id']}/tasks").json())
+
 
 def test_character_item_schema_and_custom_inventory():
     with TestClient(app) as client:

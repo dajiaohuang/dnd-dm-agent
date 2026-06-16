@@ -11,11 +11,13 @@ from sqlalchemy.orm import Session
 from app.db.database import Base, SessionLocal, engine, get_db
 from app.db.models import (Campaign, CampaignCheckpoint, CampaignEntity, CampaignEvent, CampaignMemory,
                            CampaignSetting, CampaignSettingComment, CampaignSettingDraft, CampaignSettingHistory, CampaignSummary,
-                           CampaignThread, Character, CharacterChange, CompendiumEntry, NapCatCharacterBinding)
+                           CampaignThread, Character, CharacterChange, CompendiumEntry, NapCatCharacterBinding,
+                           TaskSession)
 from app.schemas import (CampaignCreate, CampaignPatch, CharacterCreate, CharacterPatch,
                          CharacterBuildRequest, ChatRequest, DiceRequest, EventCreate,
                          NapCatBindingUpsert, SettingDraftCreate, CampaignPackageImport, SettingCommentCreate,
-                         ActorRoleplayPatch, ActorPresencePatch, CharacterQQBindingsPatch)
+                         ActorRoleplayPatch, ActorPresencePatch, CharacterQQBindingsPatch,
+                         TaskSessionCreate, TaskSessionPatch)
 from app.services import (append_event, create_summary, ingest_compendium, ingest_rules,
                           search_rules, serialize, uid)
 from app.tools.dice import roll_dice
@@ -47,6 +49,7 @@ from app.qq_bindings import (
     migrate_binding_schema_for_multiple_characters,
     set_active_napcat_campaign, set_dice_dm_actor_bindings, sync_character_bindings, unbind_qq,
 )
+from app.task_sessions import ACTIVE_STATUSES
 
 
 @asynccontextmanager
@@ -333,6 +336,77 @@ def list_campaign_checkpoints(campaign_id: str, db: Session = Depends(get_db)):
         .order_by(CampaignCheckpoint.created_at.desc())
     )
     return [serialize(item) for item in db.scalars(query).all()]
+
+
+@app.get("/campaigns/{campaign_id}/tasks")
+def list_campaign_tasks(
+    campaign_id: str,
+    task_type: str | None = None,
+    status: str | None = Query(default=None),
+    owner_user_id: str | None = None,
+    session_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    if not db.get(Campaign, campaign_id):
+        raise HTTPException(404, "Campaign not found")
+    query = select(TaskSession).where(TaskSession.campaign_id == campaign_id)
+    if task_type:
+        query = query.where(TaskSession.task_type == task_type)
+    if status:
+        query = query.where(TaskSession.status == status)
+    else:
+        query = query.where(TaskSession.status.in_(ACTIVE_STATUSES))
+    if owner_user_id:
+        query = query.where(TaskSession.owner_user_id == owner_user_id)
+    if session_id:
+        query = query.where(TaskSession.session_id == session_id)
+    return [serialize(item) for item in db.scalars(query.order_by(TaskSession.updated_at.desc())).all()]
+
+
+@app.post("/campaigns/{campaign_id}/tasks", status_code=201)
+def create_campaign_task(campaign_id: str, req: TaskSessionCreate, db: Session = Depends(get_db)):
+    if not db.get(Campaign, campaign_id):
+        raise HTTPException(404, "Campaign not found")
+    item = TaskSession(
+        id=uid("task"),
+        campaign_id=campaign_id,
+        task_type=req.task_type,
+        platform=req.platform,
+        chat_id=req.chat_id,
+        owner_user_id=req.owner_user_id,
+        session_id=req.session_id,
+        status=req.status,
+        priority=req.priority,
+        draft_data=req.draft_data,
+        proposal_data=req.proposal_data,
+        missing_fields=req.missing_fields,
+        next_prompt=req.next_prompt,
+        mentions=req.mentions,
+        source_message_id=req.source_message_id,
+        parent_task_id=req.parent_task_id,
+    )
+    db.add(item)
+    db.commit()
+    return serialize(item)
+
+
+@app.get("/campaigns/{campaign_id}/tasks/{task_id}")
+def get_campaign_task(campaign_id: str, task_id: str, db: Session = Depends(get_db)):
+    item = db.get(TaskSession, task_id)
+    if not item or item.campaign_id != campaign_id:
+        raise HTTPException(404, "Task session not found")
+    return serialize(item)
+
+
+@app.patch("/campaigns/{campaign_id}/tasks/{task_id}")
+def patch_campaign_task(campaign_id: str, task_id: str, req: TaskSessionPatch, db: Session = Depends(get_db)):
+    item = db.get(TaskSession, task_id)
+    if not item or item.campaign_id != campaign_id:
+        raise HTTPException(404, "Task session not found")
+    for key, value in req.model_dump(exclude_none=True).items():
+        setattr(item, key, value)
+    db.commit()
+    return serialize(item)
 
 
 @app.patch("/campaigns/{campaign_id}")
@@ -808,6 +882,12 @@ def chat(campaign_id: str, req: ChatRequest, db: Session = Depends(get_db)):
         req.message,
         actor_id=req.player_id,
         is_dm=req.player_id is None,
+        message_context={
+            "platform": "web",
+            "session_id": req.session_id,
+            "sender_id": req.player_id,
+            "current_text": req.message,
+        },
     )
 
 

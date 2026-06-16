@@ -138,3 +138,32 @@ class SettingCommentCreate(BaseModel):
     draft_id: str | None = None
     author_id: str | None = None
     content: str
+
+
+class TaskSessionCreate(BaseModel):
+    task_type: str
+    platform: str = "web"
+    chat_id: str | None = None
+    owner_user_id: str | None = None
+    session_id: str | None = None
+    status: str = "active"
+    priority: int = 3
+    draft_data: dict[str, Any] = Field(default_factory=dict)
+    proposal_data: dict[str, Any] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    next_prompt: str = ""
+    mentions: list[dict[str, Any]] = Field(default_factory=list)
+    source_message_id: str | None = None
+    parent_task_id: str | None = None
+
+
+class TaskSessionPatch(BaseModel):
+    status: str | None = None
+    priority: int | None = None
+    draft_data: dict[str, Any] | None = None
+    proposal_data: dict[str, Any] | None = None
+    missing_fields: list[str] | None = None
+    next_prompt: str | None = None
+    mentions: list[dict[str, Any]] | None = None
+    created_object_type: str | None = None
+    created_object_id: str | None = None

@@ -25,6 +25,10 @@ def test_campaign_editor_all_phases(monkeypatch):
         }).json()
         assert proposal["kind"] == "campaign_editor"
         assert proposal["data"]["drafts"][0]["status"] == "pending"
+        tasks = client.get(f"/campaigns/{campaign_id}/tasks", params={"task_type": "subagent_proposal"}).json()
+        assert tasks[0]["parent_task_id"]
+        assert tasks[0]["proposal_data"]["agent_role"] == "campaign_setting_reviewer"
+        assert proposal["data"]["drafts"][0]["id"] in tasks[0]["proposal_data"]["proposal"]["draft_ids"]
 
         published = client.post(f"/chat/{campaign_id}", json={"session_id": "edit", "message": "/publishsettings"}).json()
         assert len(published["data"]["settings"]) == 1

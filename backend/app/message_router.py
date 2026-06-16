@@ -21,7 +21,7 @@ from app.character_build_flow import (
     cancel_character_build, has_active_character_build, show_character_build, start_character_build,
     submit_character_build, update_character_build,
 )
-from app.task_sessions import active_task, task_scope
+from app.task_sessions import active_task, create_subagent_proposal, task_scope
 
 
 def process_message(
@@ -76,7 +76,7 @@ def process_message(
     if command and not (dice_mode and command.name == "start_combat"):
         if dice_mode:
             clear_dice_pending_state(db, campaign)
-        return execute_command(db, command, campaign, session_id, actor_id, is_dm)
+        return execute_command(db, command, campaign, session_id, actor_id, is_dm, message_context)
     if dice_mode:
         contextual = dice_context_action(
             db, campaign, message,
@@ -85,7 +85,7 @@ def process_message(
         if contextual:
             return audit_dice_result(db, campaign, session_id, character_id, actor_id, message, contextual, message_context)
     if command:
-        return execute_command(db, command, campaign, session_id, actor_id, is_dm)
+        return execute_command(db, command, campaign, session_id, actor_id, is_dm, message_context)
     effect_action = resolve_effect_action(db, campaign, bound_character, message, actor_id, session_id)
     if effect_action:
         return effect_action
@@ -93,7 +93,19 @@ def process_message(
     if active_task(db, campaign, "campaign_edit", edit_platform, edit_owner, edit_session):
         if not is_dm:
             return command_result("campaign_edit", "战役编辑模式仅允许 DM 操作。", ok=False)
+        parent_task = active_task(db, campaign, "campaign_edit", edit_platform, edit_owner, edit_session)
         result = editor_chat(db, campaign, session_id, message, actor_id)
+        if parent_task and result.get("drafts"):
+            create_subagent_proposal(
+                db,
+                campaign,
+                parent_task,
+                agent_role="campaign_setting_reviewer",
+                goal="Review and enrich generated campaign setting drafts before publication.",
+                proposal={"draft_ids": [item["id"] for item in result["drafts"]], "source_message": message},
+                next_prompt="已生成设定草稿，可审核后发布。",
+            )
+            db.commit()
         return {
             "ok": True, "kind": "campaign_editor", "command": "campaign_editor",
             "narration": result.pop("narration"), "data": result, "rolls": [], "state_changes": [], "events": [],
