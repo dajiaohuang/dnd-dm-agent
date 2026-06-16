@@ -129,6 +129,23 @@ def test_qq_character_binding_crud():
         assert client.get("/characters/char_001").json()["data"]["integrations"]["qq_user_ids"] == ["123456789"]
         assert client.get("/napcat/bindings/123456789").json()["character_id"] == "char_001"
         assert len(client.get("/napcat/bindings?campaign_id=campaign_001").json()) >= 1
+        second_same_campaign = client.post("/characters", json={
+            "campaign_id": "campaign_001", "player_name": "Alice",
+            "character_name": "Aric's Familiar", "data": {},
+        }).json()
+        assert client.put("/napcat/bindings/123456789", json={
+            "campaign_id": "campaign_001", "character_id": second_same_campaign["id"],
+        }).status_code == 200
+        same_qq_bindings = client.get("/napcat/bindings", params={"campaign_id": "campaign_001"}).json()
+        assert {
+            item["character_id"] for item in same_qq_bindings if item["qq_user_id"] == "123456789"
+        } == {"char_001", second_same_campaign["id"]}
+        assert client.delete("/napcat/bindings/123456789", params={
+            "campaign_id": "campaign_001", "character_id": second_same_campaign["id"],
+        }).status_code == 204
+        assert client.get("/napcat/bindings/123456789", params={
+            "campaign_id": "campaign_001", "character_id": "char_001",
+        }).status_code == 200
 
         switched = client.put(f"/napcat/active-campaign/{second_campaign['id']}").json()
         assert switched["id"] == second_campaign["id"]

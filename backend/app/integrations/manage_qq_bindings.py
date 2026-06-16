@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.db.database import Base, SessionLocal, engine
 from app.db.models import Character, NapCatCharacterBinding
-from app.qq_bindings import bind_qq, unbind_qq
+from app.qq_bindings import bind_qq, migrate_binding_schema_for_multiple_characters, unbind_qq
 
 
 def parser() -> argparse.ArgumentParser:
@@ -25,12 +25,14 @@ def parser() -> argparse.ArgumentParser:
 
     unbind = subcommands.add_parser("unbind", help="Delete a QQ binding.")
     unbind.add_argument("qq_user_id")
+    unbind.add_argument("--character-id", default=None)
     return command
 
 
 def main() -> None:
     args = parser().parse_args()
     Base.metadata.create_all(bind=engine)
+    migrate_binding_schema_for_multiple_characters()
     with SessionLocal() as db:
         if args.action == "characters":
             characters = db.scalars(
@@ -54,12 +56,14 @@ def main() -> None:
                 )
             return
 
-        binding = db.scalar(query.where(NapCatCharacterBinding.qq_user_id == args.qq_user_id))
         if args.action == "unbind":
-            if not binding:
+            bindings = db.scalars(query.where(NapCatCharacterBinding.qq_user_id == args.qq_user_id)).all()
+            if args.character_id:
+                bindings = [item for item in bindings if item.character_id == args.character_id]
+            if not bindings:
                 raise SystemExit("Binding not found.")
-            unbind_qq(db, args.campaign, args.qq_user_id)
-            print(f"Unbound QQ {args.qq_user_id} from campaign {args.campaign}.")
+            unbind_qq(db, args.campaign, args.qq_user_id, args.character_id)
+            print(f"Removed {len(bindings)} binding(s) for QQ {args.qq_user_id} from campaign {args.campaign}.")
             return
 
         if not args.qq_user_id.isdigit():

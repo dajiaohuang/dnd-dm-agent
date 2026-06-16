@@ -40,18 +40,25 @@ from app.campaign_editor import (
     setting_timeline, setting_to_npc_character, undo_latest_draft, validate_settings,
 )
 from app.actor_manager import list_actors, roleplay_brief, set_presence, update_roleplay
+from app.campaign_turns import current_turn
 from app.qq_bindings import (
     active_napcat_campaign, active_napcat_campaign_id, backfill_character_binding_mirrors,
-    bind_qq, delete_character_and_bindings, find_binding,
-    set_active_napcat_campaign, sync_character_bindings, unbind_qq,
+    bind_qq, delete_character_and_bindings, find_binding, find_bindings,
+    migrate_binding_schema_for_multiple_characters,
+    set_active_napcat_campaign, set_dice_dm_actor_bindings, sync_character_bindings, unbind_qq,
 )
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    migrate_binding_schema_for_multiple_characters()
     with SessionLocal() as db:
         backfill_character_binding_mirrors(db)
+        for campaign in db.scalars(select(Campaign)).all():
+            config = campaign.config or {}
+            if config.get("play_style") == "dice_assistant" and config.get("dice_dm_qq_user_id"):
+                set_dice_dm_actor_bindings(db, campaign, str(config["dice_dm_qq_user_id"]))
     if engine.dialect.name == "postgresql":
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -158,9 +165,24 @@ async def napcat_callback(
     user_id = str(payload.get("user_id", "")).strip() or "user"
     group_id = str(payload.get("group_id", "")).strip()
     session_id = f"napcat_group_{group_id}_{user_id}" if group_id else f"napcat_private_{user_id}"
-    binding = find_binding(db, campaign.id, user_id)
-    if binding:
-        character_id = binding.character_id
+    bindings = find_bindings(db, campaign.id, user_id)
+    active_actor = current_turn(campaign)
+    active_binding = next((
+        item for item in bindings
+        if active_actor and item.character_id == active_actor.get("character_id")
+    ), None)
+    named_bindings = [
+        item for item in bindings
+        if (bound := db.get(Character, item.character_id)) is not None
+        and bound.character_name.casefold() in text.casefold()
+    ]
+    selected_binding = active_binding or (named_bindings[0] if len(named_bindings) == 1 else None)
+    if not selected_binding and len(bindings) == 1:
+        selected_binding = bindings[0]
+    if selected_binding:
+        character_id = selected_binding.character_id
+    elif len(bindings) > 1:
+        character_id = None
     message_context = {
         "current_text": text,
         "reply_text": reply_text,
@@ -251,10 +273,11 @@ def switch_active_napcat_campaign(campaign_id: str, db: Session = Depends(get_db
 def get_napcat_binding(
     qq_user_id: str,
     campaign_id: str | None = Query(default=None),
+    character_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     campaign_id = campaign_id or active_napcat_campaign_id(db, settings.napcat_campaign_id)
-    binding = find_binding(db, campaign_id, qq_user_id)
+    binding = find_binding(db, campaign_id, qq_user_id, character_id)
     if not binding:
         raise HTTPException(404, "QQ user is not bound to a character in this campaign")
     return serialize_binding(binding, db)
@@ -281,13 +304,16 @@ def upsert_napcat_binding(qq_user_id: str, req: NapCatBindingUpsert, db: Session
 def delete_napcat_binding(
     qq_user_id: str,
     campaign_id: str | None = Query(default=None),
+    character_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     campaign_id = campaign_id or active_napcat_campaign_id(db, settings.napcat_campaign_id)
-    binding = find_binding(db, campaign_id, qq_user_id)
-    if not binding:
+    bindings = find_bindings(db, campaign_id, qq_user_id)
+    if character_id:
+        bindings = [item for item in bindings if item.character_id == character_id]
+    if not bindings:
         raise HTTPException(404, "QQ user is not bound to a character in this campaign")
-    unbind_qq(db, campaign_id, qq_user_id)
+    unbind_qq(db, campaign_id, qq_user_id, character_id)
 
 
 def serialize_binding(binding: NapCatCharacterBinding, db: Session) -> dict:

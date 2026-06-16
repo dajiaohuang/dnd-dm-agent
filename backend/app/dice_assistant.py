@@ -16,7 +16,7 @@ from app.config import settings
 from app.tools.dice import roll_dice, roll_with_advantage
 from app.tools.spell_catalog import search_spells
 from app.actor_manager import is_present, roleplay_brief
-from app.campaign_turns import format_turn_state, start_combat, turn_notification
+from app.campaign_turns import current_turn, format_turn_state, start_combat, turn_notification
 from app.qq_bindings import set_dice_dm_actor_bindings
 from app.combat_preferences import combat_preference
 from app.tools.effect_engine import resolve_effective_character, roll_effects_for, consume_roll_effects
@@ -75,22 +75,45 @@ def _non_turn_result(result: dict) -> dict:
     return result
 
 
-def strict_tool_output(text: str | None, campaign: Campaign) -> str | None:
+def strict_tool_output(
+    text: str | None,
+    campaign: Campaign,
+    combat_active: bool = False,
+    force_roleplay: bool = False,
+) -> str | None:
     if not text:
         return None
     forbidden = []
-    if not combat_preference(campaign, "advice"):
+    if not combat_active or not combat_preference(campaign, "advice"):
         forbidden.extend(ADVICE_OUTPUT_TERMS)
-    if not combat_preference(campaign, "roleplay"):
+    if not force_roleplay and (not combat_active or not combat_preference(campaign, "roleplay")):
         forbidden.extend(ROLEPLAY_OUTPUT_TERMS)
     return None if any(term in text for term in forbidden) else text.strip()
 
 
-def _dice_output_instructions(campaign: Campaign, narrative_mode: bool = False) -> str:
+def _dice_output_instructions(
+    campaign: Campaign,
+    narrative_mode: bool = False,
+    combat_active: bool = False,
+    force_roleplay: bool = False,
+) -> str:
+    if not combat_active:
+        return (
+            "当前不在战斗中。只作为机械与记录工具工作：可以执行检定和投骰、查询规则/法术/物品/角色卡、"
+            "计算数值，并按用户明确指令更新物品、HP、效果和记忆。"
+            "不得描述环境、扮演 NPC、续写或推进剧情、裁定行动在世界中的后果、替 DM 决定 DC 或结果，"
+            "禁止任何扮演文字。禁止给出行动建议、策略建议或下一步建议。"
+            "战斗扮演与战斗建议开关在战斗外无效。"
+        )
     roleplay = combat_preference(campaign, "roleplay")
     advice = combat_preference(campaign, "advice")
     instructions = []
-    if roleplay:
+    if force_roleplay:
+        instructions.append(
+            "当前行动者是托管角色。无论战斗扮演开关是否开启，都必须依据 hosted_actor_profile "
+            "为该角色的行动附带简短扮演文字；只表现该角色的动作、语气或战斗反应，不得借此推进剧情。"
+        )
+    elif roleplay:
         instructions.append(
             "战斗中可以依据已提供资料描写环境、扮演 NPC 并表现已建立剧情。"
             if narrative_mode else
@@ -103,6 +126,15 @@ def _dice_output_instructions(campaign: Campaign, narrative_mode: bool = False) 
     else:
         instructions.append("禁止给出行动建议、策略建议或下一步建议。")
     return "".join(instructions)
+
+
+def _is_hosted_actor(db: Session, campaign: Campaign, character: Character | None, combat_active: bool) -> bool:
+    if not combat_active or not character:
+        return False
+    active = current_turn(campaign)
+    if not active or active.get("character_id") != character.id:
+        return False
+    return character.data.get("control") in {"auto", "hosted"}
 
 
 def _automatic_tool_roll(text: str | None) -> tuple[str | None, dict | None]:
@@ -432,6 +464,7 @@ def resolve_dice_tool_question(
         if is_present(item)
     ]
     combat_active = bool(((campaign.config or {}).get("turn_state") or {}).get("combat"))
+    force_roleplay = _is_hosted_actor(db, campaign, character, combat_active)
     participants = ((campaign.config or {}).get("turn_state") or {}).get("participants") or []
     participant_by_id = {
         item.id: item
@@ -458,6 +491,7 @@ def resolve_dice_tool_question(
         for item in participant_by_id.values()
         if is_present(item) and (item.data.get("basic") or {}).get("actor_type") in {"npc", "monster"}
     ] if narrative_mode else []
+    hosted_actor_profile = roleplay_brief(character) if force_roleplay and character else None
     context = {
         "current_campaign": {
             "id": campaign.id,
@@ -487,6 +521,7 @@ def resolve_dice_tool_question(
         "target_actor_cards": target_actor_cards,
         "present_actors": present,
         "present_dm_actor_profiles": present_dm_actor_profiles,
+        "hosted_actor_profile": hosted_actor_profile,
         "relevant_rules": [
             {"source": item.get("source"), "section": item.get("section"), "text": item.get("chunk_text")}
             for item in rules
@@ -497,19 +532,25 @@ def resolve_dice_tool_question(
             if narrative_mode or item.get("visibility") != "dm_only"
         ],
     }
-    output_instructions = _dice_output_instructions(campaign, narrative_mode)
+    output_instructions = _dice_output_instructions(campaign, narrative_mode, combat_active, force_roleplay)
     role_instructions = (
         "你是当前战役的地下城主。战斗机械规则与骰娘模式完全一致，必须依据参战者实体卡、有效数值、"
         "持续效果和反应窗口结算。在机械事实之外，可以依据战役记忆和 present_dm_actor_profiles "
         "描写环境、推进已建立的剧情并扮演 NPC，但不得篡改或虚构机械数值。"
         if narrative_mode else
         "你是桌面跑团的工具型骰娘。自然、直接地回答规则、角色卡、技能、法术、物品、"
-        "检定、战斗计算，以及当前战役的进度、场景、背景、角色和已记录事实问题。"
+        "检定、数值计算和明确的状态记录问题。战役上下文只用于找到正确的角色卡、数值和记录，"
+        "不得用于讲述场景或继续故事。"
     )
     closing_instructions = (
         "允许依据已提供内容进行 NPC 台词、战斗叙述和剧情表现。"
         if narrative_mode else
-        "始终禁止 NPC 台词和剧情续写。禁止推进或编造剧情，禁止替真实 DM 决定结果。"
+        (
+            "只允许为当前托管角色的本次行动添加简短扮演文字；禁止扮演其他 NPC、剧情续写或推进剧情，"
+            "禁止替真实 DM 决定结果。"
+            if force_roleplay else
+            "始终禁止 NPC 台词和剧情续写。禁止推进或编造剧情，禁止替真实 DM 决定结果。"
+        )
     )
     answer = strict_tool_output(chat_completion([
         {
@@ -530,7 +571,7 @@ def resolve_dice_tool_question(
         },
         {"role": "system", "content": json.dumps(context, ensure_ascii=False, default=str)},
         {"role": "user", "content": message},
-    ], temperature=0.2), campaign)
+    ], temperature=0.2), campaign, combat_active, force_roleplay)
     if answer:
         roll_requested = bool(ROLL_REQUEST_RE.search(answer))
         requested_roll = ROLL_FORMULA_RE.search(answer) if roll_requested else None

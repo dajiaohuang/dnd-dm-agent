@@ -67,7 +67,9 @@ def open_reaction_window(
             NapCatCharacterBinding.campaign_id == campaign.id,
             NapCatCharacterBinding.character_id == character_id,
         ))
-        automated = participant.get("actor_type") in {"npc", "monster"} or not binding
+        dice_mode = (campaign.config or {}).get("play_style") == "dice_assistant"
+        explicitly_hosted = character.data.get("control") in {"auto", "hosted"}
+        automated = explicitly_hosted if dice_mode else participant.get("actor_type") in {"npc", "monster"} or not binding
         reactors.append({
             "character_id": character_id,
             "name": participant.get("name"),

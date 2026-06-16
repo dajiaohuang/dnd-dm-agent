@@ -68,6 +68,8 @@ which actors exist in the current scene and enter initiative.
 
 ## Shared Combat System
 
+Detailed guide: [Combat System](docs/COMBAT_SYSTEM.md) | [中文说明](docs/COMBAT_SYSTEM-cn.md)
+
 DM Mode and Dice Assistant Mode use the same combat mechanics pipeline. Initiative, participant cards,
 target resolution, reactions, rolls, effects, and turn advancement behave identically. The only
 difference is that DM Mode may add narration and roleplay.

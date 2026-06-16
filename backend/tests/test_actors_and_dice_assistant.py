@@ -26,15 +26,18 @@ def test_dice_assistant_automatically_executes_requested_roll(monkeypatch):
         assert "骰娘已自动投掷" in result["narration"]
 
 
-def test_dice_assistant_can_enable_combat_advice_and_roleplay(monkeypatch):
+def test_dice_assistant_combat_preferences_do_not_enable_noncombat_narration(monkeypatch):
+    prompts = []
     responses = iter([
         "建议使用掩体。",
         "火光映入眼帘，攻击命中。",
     ])
-    monkeypatch.setattr(
-        "app.dice_assistant.chat_completion",
-        lambda *args, **kwargs: next(responses),
-    )
+
+    def fake_chat(messages, **kwargs):
+        prompts.append(messages[0]["content"])
+        return next(responses)
+
+    monkeypatch.setattr("app.dice_assistant.chat_completion", fake_chat)
     with TestClient(app) as client:
         campaign = client.post("/campaigns", json={
             "name": "Dice Optional Output",
@@ -53,8 +56,57 @@ def test_dice_assistant_can_enable_combat_advice_and_roleplay(monkeypatch):
         roleplay = client.post(f"/chat/{campaign['id']}", json={
             "session_id": "dice_optional", "message": "Describe the attack?",
         }).json()
-        assert "建议使用掩体" in advice["narration"]
-        assert "火光映入眼帘" in roleplay["narration"]
+        assert "建议使用掩体" not in advice["narration"]
+        assert "火光映入眼帘" not in roleplay["narration"]
+        assert all("战斗扮演与战斗建议开关在战斗外无效" in prompt for prompt in prompts)
+        assert all("不得描述环境" in prompt and "裁定行动在世界中的后果" in prompt for prompt in prompts)
+
+
+def test_hosted_actor_action_always_includes_roleplay(monkeypatch):
+    captured = {}
+
+    def fake_chat(messages, **kwargs):
+        captured["system"] = messages[0]["content"]
+        captured["context"] = messages[1]["content"]
+        return "亡语鬼婆低语着挥出枯爪。"
+
+    monkeypatch.setattr("app.dice_assistant.chat_completion", fake_chat)
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={
+            "name": "Hosted Actor Roleplay",
+            "config": {"play_style": "dice_assistant", "dice_assistant_combat_roleplay_enabled": False},
+        }).json()
+        witch = client.post("/characters/build", json={
+            "campaign_id": campaign["id"], "player_name": "DM", "character_name": "亡语鬼婆",
+            "class_name": "Wizard", "actor_type": "monster",
+            "abilities": {"str": 8, "dex": 10, "con": 12, "int": 16, "wis": 14, "cha": 14},
+            "roleplay": {"voice": "像枯叶摩擦般低语。", "combat_behavior": "诅咒最虚弱的敌人。"},
+        }).json()
+        client.patch(f"/characters/{witch['id']}", json={
+            "data": {"control": "hosted"}, "reason": "explicitly hosted for test",
+        })
+        client.patch(f"/campaigns/{campaign['id']}", json={"config": {
+            "play_style": "dice_assistant",
+            "dice_assistant_combat_roleplay_enabled": False,
+            "runtime_mode": "turn_based",
+            "turn_state": {
+                "combat": True, "round": 1, "turn_index": 0,
+                "participants": [
+                    {"character_id": witch["id"], "name": "亡语鬼婆", "actor_type": "monster",
+                     "initiative": {"total": 18, "modifier": 0}, "reaction_available": True},
+                ],
+            },
+        }})
+
+        result = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "hosted", "message": "亡语鬼婆攻击。",
+        }).json()
+
+        assert "低语着挥出枯爪" in result["narration"]
+        assert "当前行动者是托管角色" in captured["system"]
+        assert "无论战斗扮演开关是否开启" in captured["system"]
+        assert '"hosted_actor_profile"' in captured["context"]
+        assert "像枯叶摩擦般低语" in captured["context"]
 
 
 def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
@@ -141,9 +193,11 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
         entered = client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/diceassistant"}).json()
         assert entered["ok"]
         assert entered["data"]["dm_qq_user_id"] == "777777"
-        assert client.get(f"/characters/{npc['id']}").json()["data"]["integrations"]["dice_dm_qq_user_id"] == "777777"
-        assert client.get(f"/characters/{monster['id']}").json()["data"]["integrations"]["dice_dm_qq_user_id"] == "777777"
-        assert "dice_dm_qq_user_id" not in client.get(f"/characters/{player['id']}").json()["data"]["integrations"]
+        dm_bindings = client.get("/napcat/bindings", params={"campaign_id": campaign_id}).json()
+        assert {(item["qq_user_id"], item["character_id"]) for item in dm_bindings if item["qq_user_id"] == "777777"} == {
+            ("777777", npc["id"]), ("777777", monster["id"]),
+        }
+        assert "777777" not in client.get(f"/characters/{player['id']}").json()["data"]["integrations"]["qq_user_ids"]
         assert client.get(f"/campaigns/{campaign_id}/status").json()["play_style"] == "dice_assistant"
         assert client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/memory anything"}).json()["ok"]
         assert client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "/save"}).json()["ok"]
@@ -280,8 +334,8 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
         }).json()
         assert exited_dice["command"] == "exit_dice_assistant"
         assert client.get(f"/campaigns/{campaign_id}/status").json()["play_style"] == "campaign"
-        assert "dice_dm_qq_user_id" not in client.get(f"/characters/{npc['id']}").json()["data"]["integrations"]
-        assert "dice_dm_qq_user_id" not in client.get(f"/characters/{monster['id']}").json()["data"]["integrations"]
+        dm_bindings = client.get("/napcat/bindings", params={"campaign_id": campaign_id}).json()
+        assert not [item for item in dm_bindings if item["qq_user_id"] == "777777"]
 
 
 def test_dice_assistant_asks_for_dm_when_uncertain(monkeypatch):
@@ -303,7 +357,9 @@ def test_dice_assistant_asks_for_dm_when_uncertain(monkeypatch):
             "session_id": "dice", "player_id": "player", "message": "DM是 888888",
         }).json()
         assert confirmed["data"]["dm_qq_user_id"] == "888888"
-        assert client.get(f"/characters/{npc['id']}").json()["data"]["integrations"]["dice_dm_qq_user_id"] == "888888"
+        assert client.get("/napcat/bindings/888888", params={
+            "campaign_id": campaign["id"], "character_id": npc["id"],
+        }).json()["character_id"] == npc["id"]
 
 
 def test_dice_assistant_explains_missing_character_binding():
@@ -439,12 +495,17 @@ def test_combat_reaction_window_pauses_roll_and_turn_until_player_decides(monkey
         assert "无人使用反应" in resolved["narration"]
         assert resolved["turn_notification"]["character_id"] == hero["id"]
 
-        automated = client.post(f"/chat/{campaign['id']}", json={
+        pending_dm_reaction = client.post(f"/chat/{campaign['id']}", json={
             "session_id": "reaction", "player_id": "player", "character_id": hero["id"],
             "message": "Hero attacks Goblin",
         }).json()
-        assert automated["rolls"][0]["formula"] == "1d20+5"
-        assert "Goblin使用Shield reaction" in automated["narration"]
+        assert not pending_dm_reaction["rolls"]
+        assert "Goblin" in pending_dm_reaction["narration"]
+        resolved_dm_reaction = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "reaction", "character_id": goblin["id"], "message": "使用Shield reaction",
+        }).json()
+        assert resolved_dm_reaction["rolls"][0]["formula"] == "1d20+5"
+        assert "Goblin使用Shield reaction" in resolved_dm_reaction["narration"]
 
 
 def test_dm_combat_uses_dice_mechanics_with_private_roleplay_context(monkeypatch):

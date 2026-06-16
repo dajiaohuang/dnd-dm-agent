@@ -36,7 +36,7 @@ class Character(Base):
 class NapCatCharacterBinding(Base):
     __tablename__ = "napcat_character_bindings"
     __table_args__ = (
-        UniqueConstraint("campaign_id", "qq_user_id", name="uq_napcat_binding_campaign_qq"),
+        UniqueConstraint("campaign_id", "qq_user_id", "character_id", name="uq_napcat_binding_campaign_qq_character"),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
