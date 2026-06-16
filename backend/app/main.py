@@ -20,10 +20,11 @@ from app.services import (append_event, create_summary, ingest_compendium, inges
                           search_rules, serialize, uid)
 from app.tools.dice import roll_dice
 from app.config import settings
-from app.integrations.napcat import (NapCatClient, callback_token_valid, download_attachments,
-                                     is_allowed, is_dm_user, is_group_at_event, is_supported_message,
-                                     mentioned_user_ids, message_text, parse_event_text, replied_message_id)
+from app.integrations.napcat import (NapCatAdapter, NapCatClient, callback_token_valid, download_attachments,
+                                     is_allowed, is_group_at_event, is_supported_message,
+                                     message_text, parse_event_text, replied_message_id)
 from app.message_router import process_message
+from app.platform_adapter import handle_platform_message
 from app.parsing.api import router as parsing_router
 from app.parsing.router import parse_files
 from app.tools.character_builder import build_character_data, export_character_sheet
@@ -40,7 +41,6 @@ from app.campaign_editor import (
     setting_timeline, setting_to_npc_character, undo_latest_draft, validate_settings,
 )
 from app.actor_manager import list_actors, roleplay_brief, set_presence, update_roleplay
-from app.campaign_turns import current_turn
 from app.qq_bindings import (
     active_napcat_campaign, active_napcat_campaign_id, backfill_character_binding_mirrors,
     bind_qq, delete_character_and_bindings, find_binding, find_bindings,
@@ -124,6 +124,7 @@ async def napcat_callback(
     client = NapCatClient.from_settings()
     if not client:
         raise HTTPException(503, "NapCat is not configured")
+    adapter = NapCatAdapter(client)
     payload = await request.json()
     if not is_supported_message(payload):
         return {"ok": True, "ignored": "unsupported_event"}
@@ -153,50 +154,17 @@ async def napcat_callback(
     if not text:
         return {"ok": True, "ignored": "empty_message", "attachment_errors": attachment_errors}
 
-    campaign = active_napcat_campaign(db) or db.get(Campaign, settings.napcat_campaign_id)
+    campaign = adapter.default_campaign(db)
     if not campaign:
         raise HTTPException(404, f"NapCat campaign not found: {settings.napcat_campaign_id}")
-    character_id = settings.napcat_character_id or None
-    default_character = db.get(Character, character_id) if character_id else None
-    if default_character and default_character.campaign_id != campaign.id:
-        character_id = None
-    elif character_id and not default_character:
-        character_id = None
-    user_id = str(payload.get("user_id", "")).strip() or "user"
     group_id = str(payload.get("group_id", "")).strip()
-    session_id = f"napcat_group_{group_id}_{user_id}" if group_id else f"napcat_private_{user_id}"
-    bindings = find_bindings(db, campaign.id, user_id)
-    active_actor = current_turn(campaign)
-    active_binding = next((
-        item for item in bindings
-        if active_actor and item.character_id == active_actor.get("character_id")
-    ), None)
-    named_bindings = [
-        item for item in bindings
-        if (bound := db.get(Character, item.character_id)) is not None
-        and bound.character_name.casefold() in text.casefold()
-    ]
-    selected_binding = active_binding or (named_bindings[0] if len(named_bindings) == 1 else None)
-    if not selected_binding and len(bindings) == 1:
-        selected_binding = bindings[0]
-    if selected_binding:
-        character_id = selected_binding.character_id
-    elif len(bindings) > 1:
-        character_id = None
-    message_context = {
-        "current_text": text,
-        "reply_text": reply_text,
-        "reply_message_id": reply_id,
-        "mentioned_user_ids": mentioned_user_ids(payload, client.self_id),
-        "message_id": payload.get("message_id"),
-        "group_id": group_id or None,
-        "sender_id": user_id,
-    }
+    group_history: list[dict] = []
+    group_history_error = ""
     confirmation_words = {"是", "要", "好", "好的", "可以", "yes", "y", "读取", "讀取"}
     if (group_id and (campaign.config or {}).get("play_style") == "dice_assistant"
             and any(word in confirmation_words for word in text.casefold().split())):
         try:
-            message_context["group_history"] = [
+            group_history = [
                 {
                     "message_id": item.get("message_id"),
                     "sender_id": str(item.get("user_id") or (item.get("sender") or {}).get("user_id") or ""),
@@ -207,42 +175,22 @@ async def napcat_callback(
                 if str(item.get("message_id") or "") != str(payload.get("message_id") or "")
             ]
         except Exception as exc:
-            message_context["group_history_error"] = str(exc)
-    campaign_dm_user_id = str((campaign.config or {}).get("dice_dm_qq_user_id") or "").strip()
-    result = process_message(
-        db, campaign, session_id, character_id, text, actor_id=user_id,
-        is_dm=is_dm_user(user_id) or user_id == campaign_dm_user_id,
-        message_context=message_context,
+            group_history_error = str(exc)
+    response = handle_platform_message(
+        db,
+        adapter,
+        adapter.incoming_from_payload(
+            payload,
+            text,
+            reply_text=reply_text,
+            group_history=group_history,
+            group_history_error=group_history_error,
+        ),
+        process_fn=process_message,
     )
-    answer = result["narration"]
-    reply: str | list[dict] = answer
-    if payload.get("message_type") == "group":
-        reaction_notifications = (
-            result.get("reaction_notifications") or result.get("data", {}).get("reaction_notifications") or []
-        )
-        notification = result.get("turn_notification") or result.get("data", {}).get("turn_notification")
-        segments = [{"type": "text", "data": {"text": f"{answer}\n\n"}}]
-        for reaction in reaction_notifications:
-            if reaction.get("qq_user_id"):
-                segments.extend([
-                    {"type": "at", "data": {"qq": str(reaction["qq_user_id"])}},
-                    {"type": "text", "data": {"text": f" 你的角色“{reaction['name']}”可以反应，请回复是否使用。\n"}},
-                ])
-        if notification and notification.get("qq_user_id"):
-            segments.extend([
-                {"type": "at", "data": {"qq": str(notification["qq_user_id"])}},
-                {"type": "text", "data": {"text": f" 轮到你的角色“{notification['name']}”行动了。"}},
-            ])
-        if len(segments) > 1:
-            reply = segments
-    return {
-        "reply": reply,
-        "auto_escape": False,
-        "at_sender": False,
-        "result": result,
-        "parsed_attachments": parsed,
-        "attachment_errors": attachment_errors,
-    }
+    response["parsed_attachments"] = parsed
+    response["attachment_errors"] = attachment_errors
+    return response
 
 
 @app.get("/napcat/bindings")

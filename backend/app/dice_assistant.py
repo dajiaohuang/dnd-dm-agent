@@ -7,7 +7,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Campaign, CampaignEvent, CampaignSummary, Character
+from app.db.models import Campaign, CampaignEvent, CampaignSummary, Character, TaskSession
 from app.services import search_rules, update_character
 from app.llm import chat_completion
 from app.campaign_memory import build_memory_package
@@ -24,6 +24,7 @@ from app.effect_actions import resolve_concentration_damage
 from app.combat_reactions import (
     format_reaction_prompt, open_reaction_window, reaction_notifications, resolve_ready_reaction_window,
 )
+from app.task_sessions import active_task, create_task, owner_mentions, task_scope
 
 ABILITY_ALIASES = {
     "力量": "str", "strength": "str", "str": "str",
@@ -164,6 +165,35 @@ def clear_dice_pending_state(db: Session, campaign: Campaign) -> None:
     state = _state(campaign)
     if state:
         _save_state(db, campaign, {})
+    for item in db.scalars(select(TaskSession).where(
+        TaskSession.campaign_id == campaign.id,
+        TaskSession.task_type.in_(("dice_memory_update", "dice_combat_setup")),
+        TaskSession.status.in_(("active", "waiting_user", "ready_to_commit")),
+    )).all():
+        item.status = "cancelled"
+    db.commit()
+
+
+def _scoped_task(
+    db: Session,
+    campaign: Campaign,
+    context: dict,
+    task_type: str,
+) -> tuple[TaskSession | None, str, str | None, str, str | None]:
+    platform, chat_id, user_id, session_id = task_scope(
+        context,
+        str(context.get("actor_id") or context.get("sender_id") or "") or None,
+        context.get("session_id"),
+    )
+    return active_task(db, campaign, task_type, platform, user_id, session_id), platform, chat_id, user_id, session_id
+
+
+def _has_active_task(db: Session, campaign: Campaign, task_type: str) -> bool:
+    return db.scalar(select(TaskSession.id).where(
+        TaskSession.campaign_id == campaign.id,
+        TaskSession.task_type == task_type,
+        TaskSession.status.in_(("active", "waiting_user", "ready_to_commit")),
+    ).limit(1)) is not None
 
 
 def _yes(text: str) -> bool:
@@ -186,6 +216,18 @@ def dice_context_action(
     lowered = text.casefold()
     context = message_context or {}
     state = _state(campaign)
+    memory_task, platform, chat_id, user_id, scoped_session = _scoped_task(
+        db, campaign, context, "dice_memory_update",
+    )
+    combat_task, _platform, _chat_id, _user_id, _scoped_session = _scoped_task(
+        db, campaign, context, "dice_combat_setup",
+    )
+    legacy_memory_pending = bool(state.get("pending_memory_history")) and not _has_active_task(
+        db, campaign, "dice_memory_update",
+    )
+    legacy_combat_pending = bool(state.get("pending_combat_setup")) and not _has_active_task(
+        db, campaign, "dice_combat_setup",
+    )
 
     if (campaign.config or {}).get("dice_dm_confirmation_pending"):
         mentioned = [str(item).strip() for item in context.get("mentioned_user_ids") or [] if str(item).strip()]
@@ -208,9 +250,12 @@ def dice_context_action(
         }
         return result
 
-    if state.get("pending_memory_history"):
+    if memory_task or legacy_memory_pending:
         if _yes(text):
             history = context.get("group_history") or []
+            if memory_task:
+                memory_task.status = "committed"
+                memory_task.proposal_data = {"include_history": True, "history_count": len(history)}
             state.pop("pending_memory_history", None)
             _save_state(db, campaign, state)
             combined = "\n".join(str(item.get("text") or "") for item in history if item.get("text"))
@@ -219,6 +264,9 @@ def dice_context_action(
             result["data"]["audit_type"] = "dice_memory_history_update"
             return result
         if _no(text):
+            if memory_task:
+                memory_task.status = "committed"
+                memory_task.proposal_data = {"include_history": False}
             state.pop("pending_memory_history", None)
             _save_state(db, campaign, state)
             return _result("仅保留当前被 @ / 引用的内容；未读取前文。")
@@ -226,15 +274,32 @@ def dice_context_action(
 
     if any(term in lowered for term in ("更新记忆", "更新記憶", "记住", "記住", "记录一下", "記錄一下")):
         source = str(context.get("reply_text") or context.get("current_text") or text).strip()
+        item = create_task(
+            db,
+            campaign,
+            "dice_memory_update",
+            platform,
+            chat_id,
+            user_id,
+            scoped_session,
+            status="waiting_user",
+            draft_data={"source": source},
+            next_prompt="要不要读取前面的聊天记录来继续更新？",
+            mentions=owner_mentions(user_id, "要不要读取前面的聊天记录来继续更新？"),
+        )
         state["pending_memory_history"] = True
         _save_state(db, campaign, state)
         result = _result(f"骰娘：已将当前被 @ / 引用内容加入记忆：\n{source}\n\n要不要读取前面的聊天记录来继续更新？")
         result["data"]["audit_content"] = source
         result["data"]["audit_type"] = "dice_memory_update"
+        result["data"]["task_session_id"] = item.id
+        result["data"]["mentions"] = item.mentions
         return result
 
-    if state.get("pending_combat_setup"):
+    if combat_task or legacy_combat_pending:
         if any(term in lowered for term in ("取消", "算了", "不打了", "退出战斗", "取消战斗", "cancel")):
+            if combat_task:
+                combat_task.status = "cancelled"
             state.pop("pending_combat_setup", None)
             _save_state(db, campaign, state)
             return _result("已取消本次战斗准备。")
@@ -258,6 +323,12 @@ def dice_context_action(
             name = item.character_name.casefold()
             modes[item.id] = "advantage" if name in advantage_text else "disadvantage" if name in disadvantage_text else "normal"
         combat = start_combat(db, campaign, [item.id for item in selected], modes)
+        if combat_task:
+            combat_task.status = "committed"
+            combat_task.proposal_data = {
+                "participant_ids": [item.id for item in selected],
+                "initiative_modes": modes,
+            }
         state.pop("pending_combat_setup", None)
         _save_state(db, campaign, state)
         order = "\n".join(
@@ -279,18 +350,34 @@ def dice_context_action(
         return result
 
     if any(term in lowered for term in ("开始战斗", "開始戰鬥", "进入战斗", "進入戰鬥", "start combat", "/combat")):
-        state["pending_combat_setup"] = True
-        _save_state(db, campaign, state)
         present = [
             item.character_name for item in db.scalars(select(Character).where(Character.campaign_id == campaign.id)).all()
             if is_present(item)
         ]
-        return _result(
+        item = create_task(
+            db,
+            campaign,
+            "dice_combat_setup",
+            platform,
+            chat_id,
+            user_id,
+            scoped_session,
+            status="waiting_user",
+            draft_data={"present_character_names": present},
+            next_prompt="请告诉我哪些角色参战，以及哪些角色先攻有优势或劣势。",
+            mentions=owner_mentions(user_id, "请补充参战角色与先攻优势/劣势。"),
+        )
+        state["pending_combat_setup"] = True
+        _save_state(db, campaign, state)
+        result = _result(
             "骰娘：准备开始战斗。请告诉我：\n"
             "1. 哪些角色参战？\n2. 哪些角色先攻有优势或劣势？\n"
             f"当前在场角色：{'、'.join(present) or '无'}\n"
             "示例：角色：Aric、Goblin；优势：Aric；劣势：Goblin"
         )
+        result["data"]["task_session_id"] = item.id
+        result["data"]["mentions"] = item.mentions
+        return result
     return None
 
 

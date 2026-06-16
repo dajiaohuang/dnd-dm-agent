@@ -50,6 +50,14 @@ EXPLICIT_COMMANDS = {
     "/combatroleplayoff": "disable_combat_roleplay",
     "/combatadviceon": "enable_combat_advice",
     "/combatadviceoff": "disable_combat_advice",
+    "/车卡": "start_character_build",
+    "/buildcharacter": "start_character_build",
+    "/取消车卡": "cancel_character_build",
+    "/cancelcharacterbuild": "cancel_character_build",
+    "/查看车卡": "show_character_build",
+    "/characterdraft": "show_character_build",
+    "/提交车卡": "submit_character_build",
+    "/submitcharacter": "submit_character_build",
 }
 
 NATURAL_COMMANDS = {
@@ -96,6 +104,15 @@ NATURAL_COMMANDS = {
     "关闭战斗扮演文字": "disable_combat_roleplay",
     "开启战斗建议": "enable_combat_advice",
     "关闭战斗建议": "disable_combat_advice",
+    "车卡": "start_character_build",
+    "开始车卡": "start_character_build",
+    "我要车卡": "start_character_build",
+    "创建角色": "start_character_build",
+    "取消车卡": "cancel_character_build",
+    "查看车卡": "show_character_build",
+    "查看车卡草稿": "show_character_build",
+    "提交车卡": "submit_character_build",
+    "确认车卡": "submit_character_build",
 }
 
 

@@ -204,6 +204,50 @@ def test_character_builder_and_template_export():
         )
 
 
+def test_parallel_character_build_sessions_do_not_cross_talk():
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={"name": "Parallel Build"}).json()
+        first = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group_a", "player_id": "alice",
+            "message": "开始车卡 名字: Luna 职业: Wizard 力量8 敏捷14 智力16",
+        }).json()
+        second = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group_b", "player_id": "bob",
+            "message": "开始车卡 名字: Brak 职业: Fighter 力量16 体质14",
+        }).json()
+        assert first["data"]["character_build_session"]["user_id"] == "alice"
+        assert second["data"]["character_build_session"]["user_id"] == "bob"
+
+        client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group_a", "player_id": "alice",
+            "message": "种族: Elf 背景: Sage 魅力13",
+        })
+        client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group_b", "player_id": "bob",
+            "message": "种族: Dwarf 背景: Soldier 敏捷12",
+        })
+
+        alice_draft = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group_a", "player_id": "alice", "message": "查看车卡",
+        }).json()["narration"]
+        bob_draft = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group_b", "player_id": "bob", "message": "查看车卡",
+        }).json()["narration"]
+        assert "Luna" in alice_draft and "Brak" not in alice_draft
+        assert "Brak" in bob_draft and "Luna" not in bob_draft
+
+        alice_submit = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group_a", "player_id": "alice", "message": "提交车卡",
+        }).json()
+        bob_submit = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group_b", "player_id": "bob", "message": "提交车卡",
+        }).json()
+        assert alice_submit["data"]["character"]["character_name"] == "Luna"
+        assert bob_submit["data"]["character"]["character_name"] == "Brak"
+        assert alice_submit["data"]["character"]["data"]["abilities"]["int"] == 16
+        assert bob_submit["data"]["character"]["data"]["abilities"]["str"] == 16
+
+
 def test_character_item_schema_and_custom_inventory():
     with TestClient(app) as client:
         client.post("/demo/bootstrap")

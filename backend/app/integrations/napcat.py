@@ -7,8 +7,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.db.models import Campaign, Character
+from app.platform_adapter import IncomingPlatformMessage, PlatformAdapter, PlatformReply
+from app.qq_bindings import active_napcat_campaign
 
 
 def allowed_user_ids() -> set[str]:
@@ -189,3 +193,65 @@ def download_attachments(client: NapCatClient, payload: dict[str, Any]) -> tuple
         except Exception as exc:
             errors.append(f"{item['name']}: {exc}")
     return root, paths, errors
+
+
+class NapCatAdapter(PlatformAdapter):
+    platform = "napcat"
+
+    def __init__(self, client: NapCatClient):
+        self.client = client
+
+    def default_campaign(self, db: Session) -> Campaign | None:
+        return active_napcat_campaign(db) or db.get(Campaign, settings.napcat_campaign_id)
+
+    def default_character_id(self, db: Session, campaign: Campaign) -> str | None:
+        character_id = settings.napcat_character_id or None
+        default_character = db.get(Character, character_id) if character_id else None
+        if default_character and default_character.campaign_id == campaign.id:
+            return character_id
+        return None
+
+    def session_id(self, message: IncomingPlatformMessage) -> str:
+        if message.is_group:
+            return f"napcat_group_{message.chat_id}_{message.user_id}"
+        return f"napcat_private_{message.user_id}"
+
+    def is_dm_user(self, user_id: str, campaign: Campaign) -> bool:
+        return is_dm_user(user_id)
+
+    def format_reply(self, message: IncomingPlatformMessage, reply: PlatformReply) -> str | list[dict[str, Any]]:
+        if not message.is_group or not reply.mentions:
+            return reply.text
+        segments: list[dict[str, Any]] = [{"type": "text", "data": {"text": f"{reply.text}\n\n"}}]
+        for mention in reply.mentions:
+            segments.extend([
+                {"type": "at", "data": {"qq": mention.user_id}},
+                {"type": "text", "data": {"text": f" {mention.text}\n"}},
+            ])
+        return segments
+
+    def incoming_from_payload(
+        self,
+        payload: dict[str, Any],
+        text: str,
+        reply_text: str = "",
+        group_history: list[dict[str, Any]] | None = None,
+        group_history_error: str = "",
+    ) -> IncomingPlatformMessage:
+        user_id = str(payload.get("user_id", "")).strip() or "user"
+        group_id = str(payload.get("group_id", "")).strip()
+        reply_id = replied_message_id(payload)
+        return IncomingPlatformMessage(
+            platform=self.platform,
+            text=text,
+            user_id=user_id,
+            chat_id=group_id,
+            message_id=payload.get("message_id"),
+            reply_message_id=reply_id,
+            reply_text=reply_text,
+            mentioned_user_ids=mentioned_user_ids(payload, self.client.self_id),
+            group_history=group_history or [],
+            group_history_error=group_history_error,
+            is_group=payload.get("message_type") == "group",
+            raw=payload,
+        )

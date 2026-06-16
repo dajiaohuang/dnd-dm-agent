@@ -208,6 +208,34 @@ def test_napcat_group_reaction_notification_ats_eligible_players(monkeypatch):
         assert ats == ["456", "789"]
 
 
+def test_napcat_group_generic_task_mentions(monkeypatch):
+    class FakeClient:
+        self_id = "123"
+
+    monkeypatch.setattr("app.main.NapCatClient.from_settings", lambda: FakeClient())
+    monkeypatch.setattr("app.main.download_attachments", lambda client, payload: (Path(tempfile.mkdtemp()), [], []))
+    monkeypatch.setattr(
+        "app.main.process_message",
+        lambda *args, **kwargs: {
+            "narration": "Need more character fields.",
+            "data": {"mentions": [{"user_id": "456", "text": "请补充你的车卡。"}]},
+        },
+    )
+    monkeypatch.setattr(settings, "napcat_campaign_id", "campaign_001")
+    monkeypatch.setattr(settings, "napcat_token", "")
+
+    with TestClient(app) as client:
+        client.post("/demo/bootstrap")
+        response = client.post("/napcat/callback", json={
+            "post_type": "message", "message_type": "group", "group_id": 88, "user_id": 999,
+            "message": [{"type": "at", "data": {"qq": "123"}}, {"type": "text", "data": {"text": "车卡"}}],
+        })
+        assert response.status_code == 200
+        reply = response.json()["reply"]
+        assert reply[1] == {"type": "at", "data": {"qq": "456"}}
+        assert "请补充你的车卡" in reply[2]["data"]["text"]
+
+
 def test_napcat_active_campaign_switches_bound_character(monkeypatch):
     used = {}
 

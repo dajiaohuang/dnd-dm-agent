@@ -62,6 +62,47 @@ class CharacterChange(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
+class CharacterBuildSession(Base):
+    __tablename__ = "character_build_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    platform: Mapped[str] = mapped_column(String, default="web", index=True)
+    user_id: Mapped[str | None] = mapped_column(String, index=True)
+    session_id: Mapped[str | None] = mapped_column(String, index=True)
+    status: Mapped[str] = mapped_column(String, default="active", index=True)
+    draft_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    missing_fields: Mapped[list] = mapped_column(JSON, default=list)
+    created_character_id: Mapped[str | None] = mapped_column(String, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class TaskSession(Base):
+    __tablename__ = "task_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    task_type: Mapped[str] = mapped_column(String, index=True)
+    platform: Mapped[str] = mapped_column(String, default="web", index=True)
+    chat_id: Mapped[str | None] = mapped_column(String, index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String, index=True)
+    session_id: Mapped[str | None] = mapped_column(String, index=True)
+    status: Mapped[str] = mapped_column(String, default="active", index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=3)
+    draft_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    proposal_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    missing_fields: Mapped[list] = mapped_column(JSON, default=list)
+    next_prompt: Mapped[str] = mapped_column(Text, default="")
+    mentions: Mapped[list] = mapped_column(JSON, default=list)
+    source_message_id: Mapped[str | None] = mapped_column(String, index=True)
+    parent_task_id: Mapped[str | None] = mapped_column(String, index=True)
+    created_object_type: Mapped[str | None] = mapped_column(String)
+    created_object_id: Mapped[str | None] = mapped_column(String, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
 class CampaignEvent(Base):
     __tablename__ = "campaign_events"
     id: Mapped[str] = mapped_column(String, primary_key=True)

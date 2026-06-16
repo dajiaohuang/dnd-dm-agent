@@ -17,6 +17,11 @@ from app.dice_assistant import clear_dice_pending_state, dice_context_action, re
 from app.actor_manager import list_actors, is_present
 from app.effect_actions import resolve_effect_action
 from app.combat_reactions import handle_reaction_response, reaction_window
+from app.character_build_flow import (
+    cancel_character_build, has_active_character_build, show_character_build, start_character_build,
+    submit_character_build, update_character_build,
+)
+from app.task_sessions import active_task, task_scope
 
 
 def process_message(
@@ -43,6 +48,20 @@ def process_message(
     dice_mode = (campaign.config or {}).get("play_style") == "dice_assistant"
     command = route_command(message)
     bound_character = db.get(Character, character_id) if character_id else None
+    if not command and compact.startswith(("车卡", "开始车卡", "我要车卡", "创建角色")):
+        return start_character_build(db, campaign, session_id, actor_id, message_context, compact)
+    if command and command.name == "start_character_build":
+        return start_character_build(db, campaign, session_id, actor_id, message_context, compact)
+    if command and command.name == "show_character_build":
+        return show_character_build(db, campaign, session_id, actor_id, message_context)
+    if command and command.name == "cancel_character_build":
+        return cancel_character_build(db, campaign, session_id, actor_id, message_context)
+    if command and command.name == "submit_character_build":
+        return submit_character_build(db, campaign, session_id, actor_id, message_context)
+    if not command and has_active_character_build(db, campaign, session_id, actor_id, message_context):
+        build_result = update_character_build(db, campaign, session_id, actor_id, message, message_context)
+        if build_result:
+            return build_result
     reaction_interrupt_commands = {"end_combat", "exit_dice_assistant", "status", "help", "pause", "save"}
     if reaction_window(campaign) and (not command or command.name not in reaction_interrupt_commands):
         reaction_result = handle_reaction_response(db, campaign, character_id, message)
@@ -59,7 +78,10 @@ def process_message(
             clear_dice_pending_state(db, campaign)
         return execute_command(db, command, campaign, session_id, actor_id, is_dm)
     if dice_mode:
-        contextual = dice_context_action(db, campaign, message, message_context)
+        contextual = dice_context_action(
+            db, campaign, message,
+            {**(message_context or {}), "session_id": session_id, "actor_id": actor_id},
+        )
         if contextual:
             return audit_dice_result(db, campaign, session_id, character_id, actor_id, message, contextual, message_context)
     if command:
@@ -67,6 +89,15 @@ def process_message(
     effect_action = resolve_effect_action(db, campaign, bound_character, message, actor_id, session_id)
     if effect_action:
         return effect_action
+    edit_platform, _edit_chat, edit_owner, edit_session = task_scope({"platform": "web"}, actor_id, session_id)
+    if active_task(db, campaign, "campaign_edit", edit_platform, edit_owner, edit_session):
+        if not is_dm:
+            return command_result("campaign_edit", "战役编辑模式仅允许 DM 操作。", ok=False)
+        result = editor_chat(db, campaign, session_id, message, actor_id)
+        return {
+            "ok": True, "kind": "campaign_editor", "command": "campaign_editor",
+            "narration": result.pop("narration"), "data": result, "rolls": [], "state_changes": [], "events": [],
+        }
     if runtime_mode(campaign) == "campaign_edit":
         if not is_dm:
             return command_result("campaign_edit", "战役编辑模式仅允许 DM 操作。", ok=False)

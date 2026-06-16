@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.commands import Command
-from app.db.models import Campaign, CampaignCheckpoint, CampaignEvent, Character
+from app.db.models import Campaign, CampaignCheckpoint, CampaignEvent, Character, TaskSession
 from app.services import append_event, create_summary, serialize, uid
 from app.campaign_turns import (
     advance_turn, end_combat, enter_turn_mode, exit_turn_mode, format_turn_state,
@@ -18,6 +18,7 @@ from app.db.models import CampaignSettingDraft
 from app.config import settings
 from app.qq_bindings import set_dice_dm_actor_bindings
 from app.combat_preferences import combat_preference, preference_style, set_combat_preference
+from app.task_sessions import active_task, create_task, owner_mentions, task_scope
 
 
 DM_ONLY_COMMANDS = {
@@ -39,6 +40,15 @@ def set_campaign_status(campaign: Campaign, status: str, session_id: str | None 
     if session_id:
         config["active_session_id"] = session_id
     campaign.config = config
+
+
+def close_campaign_edit_tasks(db: Session, campaign: Campaign, status: str) -> None:
+    for item in db.scalars(select(TaskSession).where(
+        TaskSession.campaign_id == campaign.id,
+        TaskSession.task_type == "campaign_edit",
+        TaskSession.status.in_(("active", "waiting_user", "ready_to_commit")),
+    )).all():
+        item.status = status
 
 
 def play_style(campaign: Campaign) -> str:
@@ -261,6 +271,26 @@ def execute_command(
         )
 
     if command.name == "enter_campaign_edit":
+        platform, chat_id, owner_user_id, scoped_session = task_scope(
+            {"platform": "web"},
+            actor_id,
+            session_id,
+        )
+        existing = active_task(db, campaign, "campaign_edit", platform, owner_user_id, scoped_session)
+        if not existing:
+            create_task(
+                db,
+                campaign,
+                "campaign_edit",
+                platform,
+                chat_id,
+                owner_user_id,
+                scoped_session,
+                status="active",
+                draft_data={"mode": "campaign_edit"},
+                next_prompt="请描述你要创建或修改的战役设定。",
+                mentions=owner_mentions(owner_user_id, "已进入战役编辑模式。"),
+            )
         config = copy.deepcopy(campaign.config or {})
         config["runtime_mode"] = "campaign_edit"
         config["editor_session_id"] = session_id
@@ -269,6 +299,7 @@ def execute_command(
         return command_result("enter_campaign_edit", "已进入战役编辑模式。讨论不会推进剧情，修改会先形成草稿。")
 
     if command.name == "exit_campaign_edit":
+        close_campaign_edit_tasks(db, campaign, "closed")
         config = copy.deepcopy(campaign.config or {})
         config["runtime_mode"] = "free"
         config.pop("editor_session_id", None)
@@ -278,11 +309,14 @@ def execute_command(
 
     if command.name == "publish_settings":
         published = publish_drafts(db, campaign.id, actor_id)
+        close_campaign_edit_tasks(db, campaign, "committed")
+        db.commit()
         return command_result("publish_settings", f"已发布 {len(published)} 条战役设定。",
                               data={"settings": [serialize(item) for item in published]})
 
     if command.name == "discard_settings":
         count = discard_drafts(db, campaign.id)
+        close_campaign_edit_tasks(db, campaign, "cancelled")
         config = copy.deepcopy(campaign.config or {})
         config["runtime_mode"] = "free"
         config.pop("editor_session_id", None)
