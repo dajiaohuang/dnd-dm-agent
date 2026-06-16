@@ -17,6 +17,7 @@ from app.dice_assistant import clear_dice_pending_state, dice_context_action, re
 from app.actor_manager import list_actors, is_present
 from app.effect_actions import resolve_effect_action
 from app.combat_reactions import handle_reaction_response, reaction_window
+from app.qq_bindings import set_active_napcat_campaign, sync_campaign_actor_bindings
 from app.character_build_flow import (
     cancel_character_build, has_active_character_build, show_character_build, start_character_build,
     submit_character_build, update_character_build,
@@ -25,6 +26,16 @@ from app.task_sessions import (
     active_task, create_subagent_proposal, format_ready_reviews, ready_reviews, task_scope,
 )
 from app.subagent_runner import enqueue_subagent_task
+
+
+GLOBAL_INTERRUPT_WORDS = {"退出", "取消", "结束", "停止", "算了"}
+GLOBAL_SAFE_COMMANDS = {
+    "help", "status", "save", "pause", "resume",
+    "cancel_character_build", "exit_dice_assistant", "end_combat", "exit_turn_mode",
+    "enter_campaign_edit", "exit_campaign_edit", "publish_settings", "discard_settings",
+    "list_setting_drafts", "undo_setting_draft", "validate_settings",
+    "create_campaign_from_prompt", "delete_active_campaign", "create_npc_cards_from_settings",
+}
 
 
 def process_message(
@@ -39,6 +50,30 @@ def process_message(
 ) -> dict:
     compact = " ".join(message.strip().split())
     lowered = compact.casefold()
+    if is_dm and compact.startswith(("切换到战役", "切换战役", "使用战役", "改用战役")):
+        target_name = compact.replace("切换到战役", "", 1).replace("切换战役", "", 1).replace("使用战役", "", 1).replace("改用战役", "", 1).strip(" ：:")
+        if target_name:
+            matches = [
+                item for item in db.query(Campaign).all()
+                if item.name == target_name or item.id == target_name
+            ]
+            if not matches:
+                matches = [
+                    item for item in db.query(Campaign).all()
+                    if target_name.casefold() in item.name.casefold() or target_name.casefold() in item.id.casefold()
+                ]
+            if len(matches) == 1:
+                switched = set_active_napcat_campaign(db, matches[0])
+                if (switched.config or {}).get("dice_dm_qq_user_id"):
+                    sync_campaign_actor_bindings(db, switched)
+                return command_result(
+                    "switch_active_campaign",
+                    f"已切换当前 NapCat 战役到“{switched.name}”。当前玩法：{'骰娘辅助' if (switched.config or {}).get('play_style') == 'dice_assistant' else '战役叙事'}。",
+                    data={"campaign": serialize(switched)},
+                )
+            if len(matches) > 1:
+                return command_result("switch_active_campaign", "匹配到多个战役，请说得更具体一点。", ok=False)
+            return command_result("switch_active_campaign", f"没有找到名为“{target_name}”的战役。", ok=False)
     campaign_admin_terms = (
         "创建新战役", "新建战役", "删除当前战役", "删除现在的战役", "删除这个战役",
         "保存这个战役", "保存当前战役", "保存现在的设定", "给这些npc按照设定创建角色卡",
@@ -79,11 +114,25 @@ def process_message(
         return cancel_character_build(db, campaign, session_id, actor_id, message_context)
     if command and command.name == "submit_character_build":
         return submit_character_build(db, campaign, session_id, actor_id, message_context)
-    if not command and has_active_character_build(db, campaign, session_id, actor_id, message_context):
+    if (not command and compact in GLOBAL_INTERRUPT_WORDS) and has_active_character_build(
+        db, campaign, session_id, actor_id, message_context,
+    ):
+        return cancel_character_build(db, campaign, session_id, actor_id, message_context)
+    if (
+        not command
+        and has_active_character_build(db, campaign, session_id, actor_id, message_context)
+    ):
         build_result = update_character_build(db, campaign, session_id, actor_id, message, message_context)
         if build_result:
             return build_result
-    reaction_interrupt_commands = {"end_combat", "exit_dice_assistant", "status", "help", "pause", "save"}
+    if (
+        command
+        and command.name not in {"start_character_build", "show_character_build", "submit_character_build"}
+        and command.name in GLOBAL_SAFE_COMMANDS
+        and has_active_character_build(db, campaign, session_id, actor_id, message_context)
+    ):
+        return execute_command(db, command, campaign, session_id, actor_id, is_dm, message_context)
+    reaction_interrupt_commands = GLOBAL_SAFE_COMMANDS | {"next_turn"}
     if reaction_window(campaign) and (not command or command.name not in reaction_interrupt_commands):
         reaction_result = handle_reaction_response(db, campaign, character_id, message)
         if reaction_result:
@@ -147,6 +196,8 @@ def process_message(
             "narration": result.pop("narration"), "data": result, "rolls": [], "state_changes": [], "events": [],
         }
     if runtime_mode(campaign) == "campaign_edit":
+        if command and command.name in GLOBAL_SAFE_COMMANDS:
+            return execute_command(db, command, campaign, session_id, actor_id, is_dm, message_context)
         if not is_dm:
             return command_result("campaign_edit", "战役编辑模式仅允许 DM 操作。", ok=False)
         result = editor_chat(db, campaign, session_id, message, actor_id)
@@ -166,7 +217,7 @@ def process_message(
     if (campaign.config or {}).get("play_style") == "dice_assistant":
         character = bound_character
         if runtime_mode(campaign) == "turn_based":
-            allowed, reason = turn_access(campaign, character_id, is_dm)
+            allowed, reason = turn_access(db, campaign, character_id, is_dm, actor_id)
             if not allowed:
                 return command_result("not_your_turn", reason, ok=False, data={"turn_state": format_turn_state(campaign)})
             active_actor = current_turn(campaign)
@@ -187,7 +238,7 @@ def process_message(
             "战役当前处于暂停状态。DM 可发送 /继续 恢复战役；其他命令可发送 /帮助 查看。",
             ok=False,
         )
-    allowed, reason = turn_access(campaign, character_id, is_dm)
+    allowed, reason = turn_access(db, campaign, character_id, is_dm, actor_id)
     if not allowed:
         return command_result("not_your_turn", reason, ok=False, data={"turn_state": format_turn_state(campaign)})
     action_character_id = character_id

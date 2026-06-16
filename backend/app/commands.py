@@ -53,6 +53,8 @@ EXPLICIT_COMMANDS = {
     "/车卡": "start_character_build",
     "/buildcharacter": "start_character_build",
     "/取消车卡": "cancel_character_build",
+    "/退出车卡": "cancel_character_build",
+    "/退出车卡模式": "cancel_character_build",
     "/cancelcharacterbuild": "cancel_character_build",
     "/查看车卡": "show_character_build",
     "/characterdraft": "show_character_build",
@@ -65,6 +67,10 @@ NATURAL_COMMANDS = {
     "查看帮助": "help",
     "战役状态": "status",
     "查看战役状态": "status",
+    "当前是哪个战役": "status",
+    "现在是哪个战役": "status",
+    "现在在哪个战役中": "status",
+    "当前在哪个战役中": "status",
     "保存战役": "save",
     "保存这个战役": "save",
     "保存当前战役": "save",
@@ -112,6 +118,9 @@ NATURAL_COMMANDS = {
     "我要车卡": "start_character_build",
     "创建角色": "start_character_build",
     "取消车卡": "cancel_character_build",
+    "退出车卡": "cancel_character_build",
+    "退出车卡模式": "cancel_character_build",
+    "结束车卡": "cancel_character_build",
     "查看车卡": "show_character_build",
     "查看车卡草稿": "show_character_build",
     "提交车卡": "submit_character_build",
@@ -134,4 +143,10 @@ def route_command(message: str) -> Command | None:
         return Command(EXPLICIT_COMMANDS[lowered])
     if text in NATURAL_COMMANDS:
         return Command(NATURAL_COMMANDS[text])
+    if (
+        "设定" in text
+        and any(term in lowered for term in ("npc", "怪物"))
+        and any(term in text for term in ("创建角色卡", "建立角色卡", "建角色卡", "建卡"))
+    ):
+        return Command("create_npc_cards_from_settings")
     return None

@@ -74,7 +74,10 @@ def test_hosted_actor_action_always_includes_roleplay(monkeypatch):
     with TestClient(app) as client:
         campaign = client.post("/campaigns", json={
             "name": "Hosted Actor Roleplay",
-            "config": {"play_style": "dice_assistant", "dice_assistant_combat_roleplay_enabled": False},
+            "config": {
+                "play_style": "campaign",
+                "campaign_combat_roleplay_enabled": False,
+            },
         }).json()
         witch = client.post("/characters/build", json={
             "campaign_id": campaign["id"], "player_name": "DM", "character_name": "亡语鬼婆",
@@ -82,12 +85,9 @@ def test_hosted_actor_action_always_includes_roleplay(monkeypatch):
             "abilities": {"str": 8, "dex": 10, "con": 12, "int": 16, "wis": 14, "cha": 14},
             "roleplay": {"voice": "像枯叶摩擦般低语。", "combat_behavior": "诅咒最虚弱的敌人。"},
         }).json()
-        client.patch(f"/characters/{witch['id']}", json={
-            "data": {"control": "hosted"}, "reason": "explicitly hosted for test",
-        })
         client.patch(f"/campaigns/{campaign['id']}", json={"config": {
-            "play_style": "dice_assistant",
-            "dice_assistant_combat_roleplay_enabled": False,
+            "play_style": "campaign",
+            "campaign_combat_roleplay_enabled": False,
             "runtime_mode": "turn_based",
             "turn_state": {
                 "combat": True, "round": 1, "turn_index": 0,
@@ -335,7 +335,10 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
         assert exited_dice["command"] == "exit_dice_assistant"
         assert client.get(f"/campaigns/{campaign_id}/status").json()["play_style"] == "campaign"
         dm_bindings = client.get("/napcat/bindings", params={"campaign_id": campaign_id}).json()
-        assert not [item for item in dm_bindings if item["qq_user_id"] == "777777"]
+        assert {(item["qq_user_id"], item["character_id"], item.get("note")) for item in dm_bindings if item["qq_user_id"] == "777777"} == {
+            ("777777", npc["id"], "campaign_dm_hosted"),
+            ("777777", monster["id"], "campaign_dm_hosted"),
+        }
 
 
 def test_dice_assistant_asks_for_dm_when_uncertain(monkeypatch):
@@ -360,6 +363,26 @@ def test_dice_assistant_asks_for_dm_when_uncertain(monkeypatch):
         assert client.get("/napcat/bindings/888888", params={
             "campaign_id": campaign["id"], "character_id": npc["id"],
         }).json()["character_id"] == npc["id"]
+
+
+def test_dice_dm_confirmation_can_be_cancelled_or_bypassed_by_safe_commands(monkeypatch):
+    monkeypatch.setattr(settings, "napcat_dm_user_ids", "")
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={"name": "Needs DM Escape"}).json()
+        entered = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "dice", "player_id": "player", "message": "/diceassistant",
+        }).json()
+        assert entered["data"]["dm_confirmation_pending"]
+
+        status = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "dice", "player_id": "player", "message": "查看战役",
+        }).json()
+        assert status["command"] == "status"
+
+        cancelled = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "dice", "player_id": "player", "message": "退出",
+        }).json()
+        assert "已取消本次 DM 确认" in cancelled["narration"]
 
 
 def test_dice_assistant_explains_missing_character_binding():
@@ -458,6 +481,7 @@ def test_damage_resolves_and_breaks_concentration(monkeypatch):
 
 
 def test_combat_reaction_window_pauses_roll_and_turn_until_player_decides(monkeypatch):
+    monkeypatch.setattr(settings, "napcat_dm_user_ids", "999")
     monkeypatch.setattr(
         "app.campaign_turns.roll_dice",
         lambda formula: {

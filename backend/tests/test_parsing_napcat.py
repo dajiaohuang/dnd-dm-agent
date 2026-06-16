@@ -295,6 +295,71 @@ def test_napcat_active_campaign_switches_bound_character(monkeypatch):
         client.put("/napcat/active-campaign/campaign_001")
 
 
+def test_natural_switch_active_campaign_command_updates_napcat_active():
+    with TestClient(app) as client:
+        client.post("/demo/bootstrap")
+        created = client.post("/campaigns", json={"name": "灰烬潮汐"}).json()
+        switched = client.post("/chat/campaign_001", json={
+            "session_id": "switch_campaign",
+            "message": "切换到战役 灰烬潮汐",
+        }).json()
+        assert switched["command"] == "switch_active_campaign"
+        assert client.get("/napcat/active-campaign").json()["id"] == created["id"]
+
+
+def test_napcat_campaign_creation_in_dice_mode_routes_follow_up_to_new_campaign(monkeypatch):
+    monkeypatch.setattr(settings, "napcat_dm_user_ids", "456")
+    monkeypatch.setattr(settings, "napcat_token", "")
+
+    class FakeClient:
+        self_id = "123"
+
+    monkeypatch.setattr("app.main.NapCatClient.from_settings", lambda: FakeClient())
+    monkeypatch.setattr("app.main.download_attachments", lambda client, payload: (Path(tempfile.mkdtemp()), [], []))
+
+    with TestClient(app) as client:
+        client.post("/demo/bootstrap")
+        client.patch("/campaigns/campaign_001", json={"config": {
+            "napcat_active": True,
+            "play_style": "dice_assistant",
+            "dice_dm_qq_user_id": "456",
+            "pending_generated_campaign_name": "灰烬潮汐",
+        }})
+        created = client.post("/napcat/callback", json={
+            "post_type": "message",
+            "message_type": "private",
+            "user_id": 456,
+            "message": [{"type": "text", "data": {"text": "创建新战役"}}],
+        })
+        assert created.status_code == 200
+        new_campaign_id = created.json()["result"]["data"]["campaign"]["id"]
+        client.post(f"/campaigns/{new_campaign_id}/setting-drafts", json={
+            "operation": "create",
+            "category": "npc",
+            "name": "Harbor Master",
+            "proposal": {
+                "summary": "Controls entry to the harbor.",
+                "content": {"combat": {"armor_class": 12, "max_hp": 9, "current_hp": 9}},
+            },
+        })
+        client.post(f"/campaigns/{new_campaign_id}/setting-drafts/publish")
+        client.patch("/campaigns/campaign_001", json={"config": {
+            "napcat_active": True,
+            "play_style": "dice_assistant",
+            "dice_dm_qq_user_id": "456",
+        }})
+        routed = client.post("/napcat/callback", json={
+            "post_type": "message",
+            "message_type": "private",
+            "user_id": 456,
+            "message": [{"type": "text", "data": {"text": "给设定故事里的npc都按照设定创建角色卡"}}],
+        })
+        assert routed.status_code == 200
+        assert routed.json()["result"]["command"] == "create_npc_cards_from_settings"
+        assert "1 张 NPC/怪物角色卡" in routed.json()["result"]["narration"]
+        assert client.get("/napcat/active-campaign").json()["id"] == new_campaign_id
+
+
 def test_campaign_confirmed_dm_has_napcat_dm_permission(monkeypatch):
     used = {}
 

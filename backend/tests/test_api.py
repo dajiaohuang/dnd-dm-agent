@@ -194,6 +194,31 @@ def test_natural_campaign_admin_commands_switch_and_delete_active_campaign():
         assert client.get("/napcat/active-campaign").json()["id"] == "campaign_001"
 
 
+def test_create_campaign_from_prompt_inherits_dice_context():
+    with TestClient(app) as client:
+        client.post("/demo/bootstrap")
+        client.patch("/campaigns/campaign_001", json={"config": {
+            "scene": "Old Dock",
+            "play_style": "dice_assistant",
+            "dice_dm_qq_user_id": "456",
+            "dice_combat_roleplay_enabled": True,
+            "dice_combat_advice_enabled": False,
+            "pending_generated_campaign_name": "灰烬潮汐",
+        }})
+        created = client.post("/chat/campaign_001", json={
+            "session_id": "admin", "message": "创建新战役",
+        }).json()
+        new_campaign = created["data"]["campaign"]
+        status = client.get(f"/campaigns/{new_campaign['id']}/status").json()
+        campaign = client.get(f"/campaigns/{new_campaign['id']}").json()
+        assert created["command"] == "create_campaign_from_prompt"
+        assert client.get("/napcat/active-campaign").json()["id"] == new_campaign["id"]
+        assert status["play_style"] == "dice_assistant"
+        assert campaign["config"]["dice_dm_qq_user_id"] == "456"
+        assert campaign["config"]["dice_combat_roleplay_enabled"] is True
+        assert campaign["config"]["dice_combat_advice_enabled"] is False
+
+
 def test_character_builder_and_template_export():
     with TestClient(app) as client:
         client.post("/demo/bootstrap")
@@ -290,6 +315,38 @@ def test_parallel_character_build_sessions_do_not_cross_talk(monkeypatch):
             time.sleep(0.05)
         assert latest["status"] == "ready_to_review"
         assert latest["proposal_data"]["result"]["kind"] == "character_sheet_review"
+
+
+def test_character_build_can_be_exited_with_natural_cancel_phrases():
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={"name": "Build Exit"}).json()
+        started = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group", "player_id": "alice", "message": "开始车卡 名字: Luna",
+        }).json()
+        assert started["command"] == "character_build"
+
+        exited = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group", "player_id": "alice", "message": "退出车卡",
+        }).json()
+        assert exited["command"] == "character_build"
+        assert "已取消你的车卡草稿" in exited["narration"]
+
+        status = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group", "player_id": "alice", "message": "查看战役",
+        }).json()
+        assert status["command"] == "status"
+
+
+def test_character_build_generic_exit_word_cancels_draft():
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={"name": "Build Exit Word"}).json()
+        client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group", "player_id": "alice", "message": "开始车卡",
+        })
+        exited = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "group", "player_id": "alice", "message": "退出",
+        }).json()
+        assert "已取消你的车卡草稿" in exited["narration"]
 
 
 def test_task_session_api_supports_subtask_lifecycle():

@@ -17,7 +17,7 @@ from app.campaign_editor import discard_drafts, publish_drafts, undo_latest_draf
 from app.db.models import CampaignSettingDraft
 from app.config import settings
 from app.campaign_editor import list_settings, setting_to_npc_character
-from app.qq_bindings import active_napcat_campaign, set_active_napcat_campaign, set_dice_dm_actor_bindings
+from app.qq_bindings import active_napcat_campaign, set_active_napcat_campaign, sync_campaign_actor_bindings
 from app.combat_preferences import combat_preference, preference_style, set_combat_preference
 from app.task_sessions import active_task, create_task, owner_mentions, task_scope
 
@@ -60,6 +60,27 @@ def delete_campaign_graph(db: Session, campaign: Campaign) -> None:
 
 def play_style(campaign: Campaign) -> str:
     return str((campaign.config or {}).get("play_style") or "campaign")
+
+
+def _campaign_creation_context(source: Campaign) -> dict:
+    source_config = source.config or {}
+    new_config = {"scene": "未记录"}
+    style = str(source_config.get("play_style") or "campaign")
+    if style == "dice_assistant":
+        new_config["play_style"] = "dice_assistant"
+        dm_qq_user_id = str(source_config.get("dice_dm_qq_user_id") or "").strip()
+        if dm_qq_user_id:
+            new_config["dice_dm_qq_user_id"] = dm_qq_user_id
+        elif source_config.get("dice_dm_confirmation_pending"):
+            new_config["dice_dm_confirmation_pending"] = True
+        for key in ("dice_combat_roleplay_enabled", "dice_combat_advice_enabled"):
+            if key in source_config:
+                new_config[key] = source_config[key]
+    else:
+        for key in ("campaign_combat_roleplay_enabled", "campaign_combat_advice_enabled"):
+            if key in source_config:
+                new_config[key] = source_config[key]
+    return new_config
 
 
 def append_play_event(db: Session, campaign: Campaign, *args, **kwargs):
@@ -173,11 +194,18 @@ def execute_command(
         config = copy.deepcopy(campaign.config or {})
         name = str(config.get("pending_generated_campaign_name") or "").strip() or f"{campaign.name}·新章"
         description = str(config.get("pending_generated_campaign_description") or campaign.description or "").strip()
+        new_config = _campaign_creation_context(campaign)
         new_campaign = Campaign(id=uid("camp"), name=name, system_version=campaign.system_version,
-                                description=description, config={"scene": "未记录"})
+                                description=description, config=new_config)
         db.add(new_campaign)
         db.commit()
         set_active_napcat_campaign(db, new_campaign)
+        if str(new_config.get("play_style") or "") == "dice_assistant":
+            sync_campaign_actor_bindings(
+                db,
+                new_campaign,
+                str(new_config.get("dice_dm_qq_user_id") or "").strip() or None,
+            )
         return command_result(
             "create_campaign_from_prompt",
             f"已创建并切换到新战役“{new_campaign.name}”（{new_campaign.id}）。",
@@ -209,6 +237,10 @@ def execute_command(
                 continue
             character = setting_to_npc_character(db, item)
             created.append(character)
+        dm_qq_user_id = str((campaign.config or {}).get("dice_dm_qq_user_id") or "").strip()
+        managed = []
+        if created and dm_qq_user_id:
+            managed = sync_campaign_actor_bindings(db, campaign, dm_qq_user_id)
         if not created:
             return command_result(
                 "create_npc_cards_from_settings",
@@ -217,8 +249,9 @@ def execute_command(
             )
         return command_result(
             "create_npc_cards_from_settings",
-            f"已按设定创建/同步 {len(created)} 张 NPC/怪物角色卡。",
-            data={"characters": [serialize(item) for item in created]},
+            f"已按设定创建/同步 {len(created)} 张 NPC/怪物角色卡。"
+            + (f" 已同步 DM 绑定：{len(managed)}。" if managed else ""),
+            data={"characters": [serialize(item) for item in created], "dm_actor_ids": [item.id for item in managed]},
         )
 
     behavior_commands = {
@@ -252,7 +285,7 @@ def execute_command(
             config["dice_dm_confirmation_pending"] = True
         campaign.config = config
         db.commit()
-        bound = set_dice_dm_actor_bindings(db, campaign, dm_qq_user_id or None)
+        bound = sync_campaign_actor_bindings(db, campaign, dm_qq_user_id or None)
         if not dm_qq_user_id:
             return command_result(
                 "enter_dice_assistant",
@@ -269,10 +302,10 @@ def execute_command(
         config.pop("dice_dm_confirmation_pending", None)
         campaign.config = config
         db.commit()
-        unbound = set_dice_dm_actor_bindings(db, campaign, None)
+        synced = sync_campaign_actor_bindings(db, campaign, str(config.get("dice_dm_qq_user_id") or "").strip() or None)
         return command_result(
             "exit_dice_assistant",
-            f"骰娘模式已关闭；已取消 NPC/怪物 DM 绑定：{len(unbound)}。",
+            f"骰娘模式已关闭；已同步当前战役的 NPC/怪物控制绑定：{len(synced)}。",
         )
 
     if command.name == "enter_turn_mode":
@@ -444,3 +477,4 @@ def command_result(name: str, narration: str, ok: bool = True, data: dict | None
         "state_changes": [],
         "events": [],
     }
+

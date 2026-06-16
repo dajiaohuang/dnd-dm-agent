@@ -211,22 +211,23 @@ Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
 Copy-Item .env.example .env
 cd backend
 uv sync
-$env:DATABASE_URL="sqlite:///../data/local_dnd_dm.db"
-$env:DATA_DIR="../data"
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
 
 Open:
 
-- API documentation: <http://127.0.0.1:8000/docs>
-- Health check: <http://127.0.0.1:8000/health>
+- API documentation: <http://127.0.0.1:8011/docs>
+- Health check: <http://127.0.0.1:8011/health>
+
+By default, every local entrypoint now uses the same SQLite database:
+`D:\mcp\DM_agent\data\dm_agent.db`
 
 Initialize the demo campaign:
 
 ```powershell
-Invoke-RestMethod -Method Post http://127.0.0.1:8000/demo/bootstrap
-Invoke-RestMethod -Method Post http://127.0.0.1:8000/ingest/compendium
-Invoke-RestMethod -Method Post http://127.0.0.1:8000/ingest/rules
+Invoke-RestMethod -Method Post http://127.0.0.1:8011/demo/bootstrap
+Invoke-RestMethod -Method Post http://127.0.0.1:8011/ingest/compendium
+Invoke-RestMethod -Method Post http://127.0.0.1:8011/ingest/rules
 ```
 
 ### Frontend
@@ -249,7 +250,7 @@ docker compose up --build -d
 | Service | URL |
 | --- | --- |
 | Web UI | <http://localhost:3000> |
-| API / Swagger | <http://localhost:8000/docs> |
+| API / Swagger | <http://localhost:8011/docs> |
 | Adminer | <http://localhost:8080> |
 
 ## Configuration
@@ -321,7 +322,7 @@ data/raw/
 Parse and ingest a rulebook:
 
 ```powershell
-curl.exe -X POST http://127.0.0.1:8000/parse/rulebooks `
+curl.exe -X POST http://127.0.0.1:8011/parse/rulebooks `
   -F "files=@data/raw/your-rulebook.pdf" `
   -F "system_version=DND_5E_2014"
 ```

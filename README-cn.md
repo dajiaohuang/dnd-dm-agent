@@ -207,22 +207,23 @@ flowchart TD
 Copy-Item .env.example .env
 cd backend
 uv sync
-$env:DATABASE_URL="sqlite:///../data/local_dnd_dm.db"
-$env:DATA_DIR="../data"
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
 
 访问：
 
-- API 文档：<http://127.0.0.1:8000/docs>
-- 健康检查：<http://127.0.0.1:8000/health>
+- API 文档：<http://127.0.0.1:8011/docs>
+- 健康检查：<http://127.0.0.1:8011/health>
+
+现在所有本地入口默认共用同一个 SQLite 数据库：
+`D:\mcp\DM_agent\data\dm_agent.db`
 
 初始化示例战役：
 
 ```powershell
-Invoke-RestMethod -Method Post http://127.0.0.1:8000/demo/bootstrap
-Invoke-RestMethod -Method Post http://127.0.0.1:8000/ingest/compendium
-Invoke-RestMethod -Method Post http://127.0.0.1:8000/ingest/rules
+Invoke-RestMethod -Method Post http://127.0.0.1:8011/demo/bootstrap
+Invoke-RestMethod -Method Post http://127.0.0.1:8011/ingest/compendium
+Invoke-RestMethod -Method Post http://127.0.0.1:8011/ingest/rules
 ```
 
 ### 前端
@@ -245,7 +246,7 @@ docker compose up --build -d
 | 服务 | 地址 |
 | --- | --- |
 | Web UI | <http://localhost:3000> |
-| API / Swagger | <http://localhost:8000/docs> |
+| API / Swagger | <http://localhost:8011/docs> |
 | Adminer | <http://localhost:8080> |
 
 ## 配置
@@ -317,7 +318,7 @@ data/raw/
 解析并导入规则书：
 
 ```powershell
-curl.exe -X POST http://127.0.0.1:8000/parse/rulebooks `
+curl.exe -X POST http://127.0.0.1:8011/parse/rulebooks `
   -F "files=@data/raw/your-rulebook.pdf" `
   -F "system_version=DND_5E_2014"
 ```

@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db.database import engine
 from app.db.models import Campaign, Character, NapCatCharacterBinding
-from app.services import uid
+
+MANAGED_BINDING_NOTES = {
+    "dice_assistant": "dice_assistant_dm_managed",
+    "campaign": "campaign_dm_hosted",
+}
+
+
+def uid(prefix: str) -> str:
+    return f"{prefix}_{uuid4().hex[:12]}"
 
 
 def migrate_binding_schema_for_multiple_characters() -> None:
@@ -65,12 +75,39 @@ def _write_character_qq_user_ids(character: Character, qq_user_ids: list[str]) -
         character.version += 1
 
 
-def set_dice_dm_actor_bindings(db: Session, campaign: Campaign, dm_qq_user_id: str | None) -> list[Character]:
+def play_style(campaign: Campaign) -> str:
+    return str((campaign.config or {}).get("play_style") or "campaign")
+
+
+def campaign_dm_qq_user_id(campaign: Campaign) -> str | None:
+    value = str((campaign.config or {}).get("dice_dm_qq_user_id") or "").strip()
+    return value or None
+
+
+def managed_binding_note(style: str) -> str:
+    return MANAGED_BINDING_NOTES["dice_assistant"] if style == "dice_assistant" else MANAGED_BINDING_NOTES["campaign"]
+
+
+def is_managed_binding(binding: NapCatCharacterBinding) -> bool:
+    return str(binding.note or "").strip() in set(MANAGED_BINDING_NOTES.values())
+
+
+def controlled_actor(character: Character) -> bool:
+    actor_type = ((character.data or {}).get("basic") or {}).get("actor_type", "player")
+    return actor_type in {"npc", "monster"}
+
+
+def sync_campaign_actor_bindings(
+    db: Session,
+    campaign: Campaign,
+    dm_qq_user_id: str | None = None,
+) -> list[Character]:
+    dm_qq_user_id = (dm_qq_user_id or campaign_dm_qq_user_id(campaign) or "").strip() or None
+    desired_note = managed_binding_note(play_style(campaign))
     updated = []
     characters = db.scalars(select(Character).where(Character.campaign_id == campaign.id)).all()
     for character in characters:
-        actor_type = ((character.data or {}).get("basic") or {}).get("actor_type", "player")
-        if actor_type not in {"npc", "monster"}:
+        if not controlled_actor(character):
             continue
         data = copy.deepcopy(character.data or {})
         integrations = copy.deepcopy(data.get("integrations") or {})
@@ -83,8 +120,11 @@ def set_dice_dm_actor_bindings(db: Session, campaign: Campaign, dm_qq_user_id: s
         stale_managed = db.scalars(select(NapCatCharacterBinding).where(
             NapCatCharacterBinding.campaign_id == campaign.id,
             NapCatCharacterBinding.character_id == character.id,
-            NapCatCharacterBinding.note == "dice_assistant_dm_managed",
-            *([] if not dm_qq_user_id else [NapCatCharacterBinding.qq_user_id != dm_qq_user_id]),
+            NapCatCharacterBinding.note.in_(tuple(MANAGED_BINDING_NOTES.values())),
+            *([] if not dm_qq_user_id else [
+                (NapCatCharacterBinding.qq_user_id != dm_qq_user_id)
+                | (NapCatCharacterBinding.note != desired_note)
+            ]),
         )).all()
         for binding in stale_managed:
             db.delete(binding)
@@ -100,12 +140,20 @@ def set_dice_dm_actor_bindings(db: Session, campaign: Campaign, dm_qq_user_id: s
             if not existing:
                 bind_qq(
                     db, campaign.id, dm_qq_user_id, character,
-                    note="dice_assistant_dm_managed",
+                    note=desired_note,
                 )
+                updated.append(character)
+            elif existing.note != desired_note and is_managed_binding(existing):
+                existing.note = desired_note
+                db.commit()
                 updated.append(character)
         else:
             continue
     return list({item.id: item for item in updated}.values())
+
+
+def set_dice_dm_actor_bindings(db: Session, campaign: Campaign, dm_qq_user_id: str | None) -> list[Character]:
+    return sync_campaign_actor_bindings(db, campaign, dm_qq_user_id)
 
 
 def find_bindings(db: Session, campaign_id: str, qq_user_id: str) -> list[NapCatCharacterBinding]:
@@ -128,6 +176,51 @@ def find_binding(
     if character_id:
         query = query.where(NapCatCharacterBinding.character_id == character_id)
     return db.scalar(query.order_by(NapCatCharacterBinding.updated_at.desc()))
+
+
+def bindings_for_character(db: Session, campaign_id: str, character_id: str) -> list[NapCatCharacterBinding]:
+    return db.scalars(select(NapCatCharacterBinding).where(
+        NapCatCharacterBinding.campaign_id == campaign_id,
+        NapCatCharacterBinding.character_id == character_id,
+    ).order_by(NapCatCharacterBinding.updated_at.desc())).all()
+
+
+def primary_controller_binding(db: Session, campaign_id: str, character_id: str) -> NapCatCharacterBinding | None:
+    return db.scalar(select(NapCatCharacterBinding).where(
+        NapCatCharacterBinding.campaign_id == campaign_id,
+        NapCatCharacterBinding.character_id == character_id,
+    ).order_by(NapCatCharacterBinding.updated_at.desc()))
+
+
+def user_controls_character(
+    db: Session,
+    campaign_id: str,
+    character_id: str,
+    qq_user_id: str | None,
+) -> bool:
+    if not qq_user_id:
+        return False
+    return find_binding(db, campaign_id, str(qq_user_id), character_id) is not None
+
+
+def character_is_hosted(
+    db: Session,
+    campaign: Campaign,
+    character: Character | None,
+    qq_user_id: str | None = None,
+) -> bool:
+    if not character or not controlled_actor(character):
+        return False
+    style = play_style(campaign)
+    if style != "campaign":
+        return False
+    dm_qq = campaign_dm_qq_user_id(campaign)
+    if qq_user_id and dm_qq and str(qq_user_id).strip() == dm_qq:
+        return True
+    bindings = bindings_for_character(db, campaign.id, character.id)
+    if any(str(binding.note or "").strip() == MANAGED_BINDING_NOTES["campaign"] for binding in bindings):
+        return True
+    return True
 
 
 def bind_qq(
@@ -223,8 +316,24 @@ def backfill_character_binding_mirrors(db: Session) -> None:
 
 
 def active_napcat_campaign(db: Session) -> Campaign | None:
-    campaigns = db.scalars(select(Campaign).order_by(Campaign.updated_at.desc())).all()
-    return next((item for item in campaigns if (item.config or {}).get("napcat_active")), None)
+    flagged = [
+        item for item in db.scalars(select(Campaign)).all()
+        if (item.config or {}).get("napcat_active")
+    ]
+    if not flagged:
+        return None
+    stamped = [
+        item for item in flagged
+        if str((item.config or {}).get("napcat_active_updated_at") or "").strip()
+    ]
+    if stamped:
+        stamped.sort(
+            key=lambda item: str((item.config or {}).get("napcat_active_updated_at") or ""),
+            reverse=True,
+        )
+        return stamped[0]
+    flagged.sort(key=lambda item: item.updated_at, reverse=True)
+    return flagged[0]
 
 
 def active_napcat_campaign_id(db: Session, fallback: str) -> str:
@@ -233,14 +342,20 @@ def active_napcat_campaign_id(db: Session, fallback: str) -> str:
 
 
 def set_active_napcat_campaign(db: Session, campaign: Campaign) -> Campaign:
+    activated_at = datetime.now(timezone.utc).isoformat()
     for item in db.scalars(select(Campaign)).all():
         config = copy.deepcopy(item.config or {})
         active = item.id == campaign.id
         if bool(config.get("napcat_active")) != active:
             if active:
                 config["napcat_active"] = True
+                config["napcat_active_updated_at"] = activated_at
             else:
                 config.pop("napcat_active", None)
+                config.pop("napcat_active_updated_at", None)
+            item.config = config
+        elif active and str(config.get("napcat_active_updated_at") or "") != activated_at:
+            config["napcat_active_updated_at"] = activated_at
             item.config = config
     db.commit()
     return campaign

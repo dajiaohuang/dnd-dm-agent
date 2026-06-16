@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Campaign, Character, NapCatCharacterBinding
+from app.qq_bindings import primary_controller_binding, user_controls_character
 from app.tools.dice import roll_dice, roll_with_advantage
 from app.actor_manager import actor_type, is_present
 from app.tools.effect_engine import advance_effect_durations, resolve_effective_character
@@ -159,14 +160,22 @@ def advance_turn(db: Session, campaign: Campaign) -> dict | None:
     return participants[next_index]
 
 
-def turn_access(campaign: Campaign, character_id: str | None, is_dm: bool) -> tuple[bool, str]:
+def turn_access(
+    db: Session,
+    campaign: Campaign,
+    character_id: str | None,
+    is_dm: bool,
+    controller_user_id: str | None = None,
+) -> tuple[bool, str]:
     if runtime_mode(campaign) != "turn_based":
         return True, ""
     current = current_turn(campaign)
     if not current:
         return False, "当前回合制没有参与角色。"
     if current["actor_type"] in {"npc", "monster"}:
-        return (True, "") if is_dm else (False, f"当前是 NPC“{current['name']}”的回合，由 DM 操作。")
+        if is_dm or user_controls_character(db, campaign.id, current["character_id"], controller_user_id):
+            return True, ""
+        return False, f"当前是 NPC“{current['name']}”的回合，由 DM 操作。"
     if character_id == current["character_id"]:
         return True, ""
     return False, f"当前是玩家角色“{current['name']}”的回合。"
@@ -182,12 +191,8 @@ def turn_notification(db: Session, campaign: Campaign) -> dict | None:
         "actor_type": current["actor_type"],
         "round": turn_state(campaign).get("round", 1),
     }
-    if current["actor_type"] == "player":
-        binding = db.scalar(select(NapCatCharacterBinding).where(
-            NapCatCharacterBinding.campaign_id == campaign.id,
-            NapCatCharacterBinding.character_id == current["character_id"],
-        ))
-        notification["qq_user_id"] = binding.qq_user_id if binding else None
+    binding = primary_controller_binding(db, campaign.id, current["character_id"])
+    notification["qq_user_id"] = binding.qq_user_id if binding else None
     return notification
 
 

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Campaign, Character, NapCatCharacterBinding
+from app.qq_bindings import character_is_hosted, primary_controller_binding
 from app.tools.dice import roll_dice
 
 
@@ -63,13 +64,10 @@ def open_reaction_window(
         options = _reaction_options(character)
         if not options:
             continue
-        binding = db.scalar(select(NapCatCharacterBinding).where(
-            NapCatCharacterBinding.campaign_id == campaign.id,
-            NapCatCharacterBinding.character_id == character_id,
-        ))
+        binding = primary_controller_binding(db, campaign.id, character_id)
         dice_mode = (campaign.config or {}).get("play_style") == "dice_assistant"
-        explicitly_hosted = character.data.get("control") in {"auto", "hosted"}
-        automated = explicitly_hosted if dice_mode else participant.get("actor_type") in {"npc", "monster"} or not binding
+        hosted = character_is_hosted(db, campaign, character)
+        automated = hosted if dice_mode else participant.get("actor_type") in {"npc", "monster"} or not binding
         reactors.append({
             "character_id": character_id,
             "name": participant.get("name"),

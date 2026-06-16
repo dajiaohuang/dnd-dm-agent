@@ -17,7 +17,7 @@ from app.tools.dice import roll_dice, roll_with_advantage
 from app.tools.spell_catalog import search_spells
 from app.actor_manager import is_present, roleplay_brief
 from app.campaign_turns import current_turn, format_turn_state, start_combat, turn_notification
-from app.qq_bindings import set_dice_dm_actor_bindings
+from app.qq_bindings import character_is_hosted, sync_campaign_actor_bindings
 from app.combat_preferences import combat_preference
 from app.tools.effect_engine import resolve_effective_character, roll_effects_for, consume_roll_effects
 from app.effect_actions import resolve_concentration_damage
@@ -25,6 +25,8 @@ from app.combat_reactions import (
     format_reaction_prompt, open_reaction_window, reaction_notifications, resolve_ready_reaction_window,
 )
 from app.task_sessions import active_task, create_task, owner_mentions, task_scope
+
+GLOBAL_EXIT_WORDS = {"退出", "取消", "结束", "停止", "算了"}
 
 ABILITY_ALIASES = {
     "力量": "str", "strength": "str", "str": "str",
@@ -135,7 +137,7 @@ def _is_hosted_actor(db: Session, campaign: Campaign, character: Character | Non
     active = current_turn(campaign)
     if not active or active.get("character_id") != character.id:
         return False
-    return character.data.get("control") in {"auto", "hosted"}
+    return character_is_hosted(db, campaign, character)
 
 
 def _automatic_tool_roll(text: str | None) -> tuple[str | None, dict | None]:
@@ -230,6 +232,12 @@ def dice_context_action(
     )
 
     if (campaign.config or {}).get("dice_dm_confirmation_pending"):
+        if text in GLOBAL_EXIT_WORDS or any(term in lowered for term in ("退出骰娘", "取消确认", "先算了")):
+            config = copy.deepcopy(campaign.config or {})
+            config.pop("dice_dm_confirmation_pending", None)
+            campaign.config = config
+            db.commit()
+            return _result("已取消本次 DM 确认。")
         mentioned = [str(item).strip() for item in context.get("mentioned_user_ids") or [] if str(item).strip()]
         match = re.search(r"(?:dm\s*(?:是|为|=)?\s*)?(\d{5,})", lowered)
         dm_qq_user_id = mentioned[0] if len(mentioned) == 1 else match.group(1) if match else ""
@@ -240,7 +248,7 @@ def dice_context_action(
         config.pop("dice_dm_confirmation_pending", None)
         campaign.config = config
         db.commit()
-        bound = set_dice_dm_actor_bindings(db, campaign, dm_qq_user_id)
+        bound = sync_campaign_actor_bindings(db, campaign, dm_qq_user_id)
         result = _result(f"DM QQ：{dm_qq_user_id}；已关联 NPC/怪物：{len(bound)}。")
         result["data"] = {
             "audit_type": "dice_dm_confirmed",
@@ -251,6 +259,12 @@ def dice_context_action(
         return result
 
     if memory_task or legacy_memory_pending:
+        if text in GLOBAL_EXIT_WORDS:
+            if memory_task:
+                memory_task.status = "cancelled"
+            state.pop("pending_memory_history", None)
+            _save_state(db, campaign, state)
+            return _result("已取消这次记忆更新。")
         if _yes(text):
             history = context.get("group_history") or []
             if memory_task:
@@ -297,7 +311,7 @@ def dice_context_action(
         return result
 
     if combat_task or legacy_combat_pending:
-        if any(term in lowered for term in ("取消", "算了", "不打了", "退出战斗", "取消战斗", "cancel")):
+        if text in GLOBAL_EXIT_WORDS or any(term in lowered for term in ("不打了", "退出战斗", "取消战斗", "cancel")):
             if combat_task:
                 combat_task.status = "cancelled"
             state.pop("pending_combat_setup", None)

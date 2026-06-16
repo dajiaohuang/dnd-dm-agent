@@ -1,11 +1,15 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PROJECT_ENV = Path(__file__).resolve().parents[2] / ".env"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ENV = PROJECT_ROOT / ".env"
+DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
+DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "dm_agent.db"
+DEFAULT_DB_URL = f"sqlite:///{DEFAULT_DB_PATH.as_posix()}"
 
 
 class Settings(BaseSettings):
-    database_url: str = "sqlite:///./dnd_dm.db"
+    database_url: str = DEFAULT_DB_URL
     embedding_model: str = "BAAI/bge-m3"
     embedding_backend: str = "local_bge_m3"
     embedding_dim: int = 1024
@@ -14,7 +18,7 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_api_key: str = ""
     llm_model: str = "deepseek-chat"
-    data_dir: Path = Path("/app/data")
+    data_dir: Path = DEFAULT_DATA_DIR
     napcat_base_url: str = ""
     napcat_token: str = ""
     napcat_self_id: str = ""

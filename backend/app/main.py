@@ -47,7 +47,7 @@ from app.qq_bindings import (
     active_napcat_campaign, active_napcat_campaign_id, backfill_character_binding_mirrors,
     bind_qq, delete_character_and_bindings, find_binding, find_bindings,
     migrate_binding_schema_for_multiple_characters,
-    set_active_napcat_campaign, set_dice_dm_actor_bindings, sync_character_bindings, unbind_qq,
+    set_active_napcat_campaign, sync_campaign_actor_bindings, sync_character_bindings, unbind_qq,
 )
 from app.task_sessions import ACTIVE_STATUSES
 
@@ -60,8 +60,8 @@ async def lifespan(_: FastAPI):
         backfill_character_binding_mirrors(db)
         for campaign in db.scalars(select(Campaign)).all():
             config = campaign.config or {}
-            if config.get("play_style") == "dice_assistant" and config.get("dice_dm_qq_user_id"):
-                set_dice_dm_actor_bindings(db, campaign, str(config["dice_dm_qq_user_id"]))
+            if config.get("dice_dm_qq_user_id"):
+                sync_campaign_actor_bindings(db, campaign, str(config["dice_dm_qq_user_id"]))
     if engine.dialect.name == "postgresql":
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -217,7 +217,10 @@ def switch_active_napcat_campaign(campaign_id: str, db: Session = Depends(get_db
     campaign = db.get(Campaign, campaign_id)
     if not campaign:
         raise HTTPException(404, "Campaign not found")
-    return serialize(set_active_napcat_campaign(db, campaign))
+    switched = set_active_napcat_campaign(db, campaign)
+    if (switched.config or {}).get("dice_dm_qq_user_id"):
+        sync_campaign_actor_bindings(db, switched)
+    return serialize(switched)
 
 
 @app.get("/napcat/bindings/{qq_user_id}")
@@ -414,9 +417,16 @@ def patch_campaign(campaign_id: str, req: CampaignPatch, db: Session = Depends(g
     campaign = db.get(Campaign, campaign_id)
     if not campaign:
         raise HTTPException(404, "Campaign not found")
+    before_config = dict(campaign.config or {})
     for key, value in req.model_dump(exclude_none=True).items():
         setattr(campaign, key, value)
     db.commit()
+    after_config = campaign.config or {}
+    if (
+        before_config.get("play_style") != after_config.get("play_style")
+        or before_config.get("dice_dm_qq_user_id") != after_config.get("dice_dm_qq_user_id")
+    ):
+        sync_campaign_actor_bindings(db, campaign, str(after_config.get("dice_dm_qq_user_id") or "").strip() or None)
     return serialize(campaign)
 
 
@@ -439,7 +449,11 @@ def create_npc_from_setting(campaign_id: str, setting_id: str, db: Session = Dep
     item = db.get(CampaignSetting, setting_id)
     if not item or item.campaign_id != campaign_id or item.category not in {"npc", "monster"}:
         raise HTTPException(404, "Published NPC or monster setting not found")
-    return serialize(setting_to_npc_character(db, item))
+    character = setting_to_npc_character(db, item)
+    campaign = db.get(Campaign, campaign_id)
+    if campaign and (campaign.config or {}).get("dice_dm_qq_user_id"):
+        sync_campaign_actor_bindings(db, campaign)
+    return serialize(character)
 
 
 @app.get("/campaigns/{campaign_id}/setting-drafts")
@@ -553,7 +567,8 @@ def import_campaign(campaign_id: str, req: CampaignPackageImport, db: Session = 
 
 @app.post("/characters", status_code=201)
 def create_character(req: CharacterCreate, db: Session = Depends(get_db)):
-    if not db.get(Campaign, req.campaign_id):
+    campaign = db.get(Campaign, req.campaign_id)
+    if not campaign:
         raise HTTPException(404, "Campaign not found")
     payload = req.model_dump()
     payload["data"] = normalize_character_inventory(payload["data"])
@@ -570,12 +585,15 @@ def create_character(req: CharacterCreate, db: Session = Depends(get_db)):
             db.delete(character)
             db.commit()
             raise HTTPException(400, str(exc)) from exc
+    if (campaign.config or {}).get("dice_dm_qq_user_id"):
+        sync_campaign_actor_bindings(db, campaign)
     return serialize(character)
 
 
 @app.post("/characters/build", status_code=201)
 def build_character(req: CharacterBuildRequest, db: Session = Depends(get_db)):
-    if not db.get(Campaign, req.campaign_id):
+    campaign = db.get(Campaign, req.campaign_id)
+    if not campaign:
         raise HTTPException(404, "Campaign not found")
     data = build_character_data(req.model_dump())
     character = Character(
@@ -587,6 +605,8 @@ def build_character(req: CharacterBuildRequest, db: Session = Depends(get_db)):
     )
     db.add(character)
     db.commit()
+    if (campaign.config or {}).get("dice_dm_qq_user_id"):
+        sync_campaign_actor_bindings(db, campaign)
     return {
         **serialize(character),
         "point_buy_cost": data["derived"]["point_buy_cost"],
@@ -756,6 +776,7 @@ def patch_character(character_id: str, req: CharacterPatch, db: Session = Depend
     character = db.get(Character, character_id)
     if not character:
         raise HTTPException(404, "Character not found")
+    campaign = db.get(Campaign, character.campaign_id)
     qq_user_ids = ((req.data.get("integrations") or {}).get("qq_user_ids")
                    if isinstance(req.data.get("integrations"), dict) else None)
     if qq_user_ids is not None and any(not str(item).strip().isdigit() for item in qq_user_ids):
@@ -766,6 +787,8 @@ def patch_character(character_id: str, req: CharacterPatch, db: Session = Depend
             sync_character_bindings(db, character, qq_user_ids)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+    if campaign and (campaign.config or {}).get("dice_dm_qq_user_id"):
+        sync_campaign_actor_bindings(db, campaign)
     return {"character": serialize(character), "change": serialize(change)}
 
 
@@ -944,12 +967,23 @@ def demo_bootstrap(db: Session = Depends(get_db)):
         campaign = Campaign(id="campaign_001", name="北境之门", system_version="DND_5E_2014",
                             description="一支冒险小队抵达戒备森严的北境之门。", config={"scene": "North Gate"})
         db.add(campaign)
+    else:
+        campaign.name = "北境之门"
+        campaign.system_version = "DND_5E_2014"
+        campaign.description = "一支冒险小队抵达戒备森严的北境之门。"
+        campaign.config = {"scene": "North Gate"}
     character = db.get(Character, "char_001")
     if not character:
         character = Character(id="char_001", campaign_id="campaign_001", player_name="Player",
                               character_name="Aric", data=demo_character())
         db.add(character)
+    else:
+        character.campaign_id = "campaign_001"
+        character.player_name = "Player"
+        character.character_name = "Aric"
+        character.data = demo_character()
     db.commit()
+    set_active_napcat_campaign(db, campaign)
     return {"campaign": serialize(campaign), "character": serialize(character)}
 
 

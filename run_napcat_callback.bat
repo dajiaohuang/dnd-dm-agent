@@ -11,6 +11,6 @@ if errorlevel 1 (
   exit /b 1
 )
 cd /d "%ROOT%backend"
-set "DATABASE_URL=sqlite:///%ROOT:\=/%data/napcat_dnd.db"
+if "%DATABASE_URL%"=="" set "DATABASE_URL=sqlite:///%ROOT:\=/%data/dm_agent.db"
 set "DATA_DIR=%ROOT%data"
 %UV% run --no-sync uvicorn app.main:app --host 127.0.0.1 --port %PORT%

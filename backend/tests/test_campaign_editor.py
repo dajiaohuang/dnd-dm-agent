@@ -104,3 +104,22 @@ def test_campaign_editor_all_phases(monkeypatch):
         context = captured["messages"][1]["content"]
         assert "relevant_campaign_settings" in context
         assert "Gray Harbor" in context
+
+
+def test_campaign_edit_mode_allows_safe_commands_and_exit():
+    with TestClient(app) as client:
+        campaign = client.post("/campaigns", json={"name": "Editor Escape"}).json()
+        entered = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "edit", "message": "/editcampaign",
+        }).json()
+        assert entered["ok"]
+
+        status = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "edit", "message": "查看战役",
+        }).json()
+        assert status["command"] == "status"
+
+        exited = client.post(f"/chat/{campaign['id']}", json={
+            "session_id": "edit", "message": "退出编辑",
+        }).json()
+        assert exited["command"] == "exit_campaign_edit"

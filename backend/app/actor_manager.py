@@ -14,7 +14,7 @@ def actor_type(character: Character) -> str:
 
 
 def is_dm_actor(character: Character) -> bool:
-    return actor_type(character) in {"npc", "monster"} or character.data.get("control") == "dm"
+    return actor_type(character) in {"npc", "monster"}
 
 
 def is_present(character: Character) -> bool:
