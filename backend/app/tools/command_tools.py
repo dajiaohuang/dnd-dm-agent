@@ -993,6 +993,38 @@ def handle_discard_setting_drafts(
     return _ok(f"已放弃 {discarded} 条设定草稿。")
 
 # ═══════════════════════════════════════════════════════════════════
+#  DELEGATE TO execute_command (22 DM-only / query commands)
+# ═══════════════════════════════════════════════════════════════════
+
+def _via_execute_command(command_name: str):
+    """Return a handler that dispatches to execute_command()."""
+    def handler(db: Session, campaign: Campaign, is_dm: bool = False,
+                session_id: str = None, actor_id: str = None,
+                message_context: dict = None, **_kw: Any) -> dict:
+        from app.commands import Command
+        from app.campaign_control import execute_command
+        return execute_command(
+            db, Command(command_name), campaign,
+            session_id, actor_id, is_dm, message_context,
+        )
+    return handler
+
+_DELEGATED = [
+    "save", "pause", "resume",
+    "enter_turn_mode", "exit_turn_mode",
+    "start_combat", "end_combat", "next_turn",
+    "enter_campaign_edit", "exit_campaign_edit",
+    "publish_settings", "discard_settings",
+    "list_setting_drafts", "undo_setting_draft", "validate_settings",
+    "enter_dice_assistant", "exit_dice_assistant",
+    "enable_combat_roleplay", "disable_combat_roleplay",
+    "create_npc_cards_from_settings",
+    "memory_search", "spell_search",
+]
+_DELEGATED_HANDLERS = {name: _via_execute_command(name) for name in _DELEGATED}
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  HANDLER REGISTRY
 # ═══════════════════════════════════════════════════════════════════
 
@@ -1038,6 +1070,8 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "use_feature": COMBAT_HANDLERS["use_feature"],
     "end_turn": COMBAT_HANDLERS["end_turn"],
     "turn_status": COMBAT_HANDLERS["turn_status"],
+    # Delegated to execute_command
+    **_DELEGATED_HANDLERS,
 }
 
 
