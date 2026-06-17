@@ -380,7 +380,10 @@ def resolve_chat(db: Session, campaign_id: str | None, session_id: str | None, c
     """
     campaign = db.get(Campaign, campaign_id) if campaign_id else None
     character = db.get(Character, character_id) if character_id else None
-    context_prompt, context_refs = build_dm_context(db, campaign_id, session_id, character, message)
+    if campaign:
+        context_prompt, context_refs = build_dm_context(db, campaign_id, session_id, character, message)
+    else:
+        context_prompt = "{}"
     text = message.lower()
     rolls, changes = [], []
     result_data = {}
