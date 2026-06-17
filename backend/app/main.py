@@ -147,15 +147,15 @@ async def napcat_callback(
         return dice_passive
 
     if (payload.get("message_type") == "group" and settings.napcat_require_group_at
-            and not is_group_at_event(payload, client.self_id)):
+            and not is_group_at_event(payload, client.self_ids)):
         return {"ok": True, "ignored": "group_message_without_at"}
 
-    text = parse_event_text(payload, client.self_id)
+    text = parse_event_text(payload, client.self_ids)
     reply_text = ""
     reply_id = replied_message_id(payload)
     if reply_id:
         try:
-            reply_text = message_text(client.get_message(reply_id), client.self_id)
+            reply_text = message_text(client.get_message(reply_id), client.self_ids)
         except Exception:
             reply_text = ""
     temp_root, paths, attachment_errors = download_attachments(client, payload)
@@ -234,7 +234,7 @@ async def napcat_callback(
                 {
                     "message_id": item.get("message_id"),
                     "sender_id": str(item.get("user_id") or (item.get("sender") or {}).get("user_id") or ""),
-                    "text": message_text(item, client.self_id),
+                    "text": message_text(item, client.self_ids),
                     "time": item.get("time"),
                 }
                 for item in client.get_group_history(group_id, 20)
@@ -1373,7 +1373,7 @@ _PURE_DICE_RE = _re.compile(r"^\s*(\d*d\d+(?:\s*[+-]\s*\d+)?)\s*$", _re.IGNORECA
 
 def _handle_dice_passive(payload: dict, client) -> dict | None:
     """If the message is a pure dice formula, roll it and @ the sender."""
-    text = parse_event_text(payload, client.self_id).strip()
+    text = parse_event_text(payload, client.self_ids).strip()
     if not text:
         return None
     match = _PURE_DICE_RE.match(text)
