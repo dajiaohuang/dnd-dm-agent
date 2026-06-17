@@ -173,7 +173,10 @@ async def napcat_callback(
 
     campaign = adapter.default_campaign(db)
     if not campaign:
-        return {"reply": "还没有战役。请发送 /创建战役 名称 来创建第一个战役。", "auto_escape": False, "at_sender": False}
+        # Direct to lobby mode — no campaign needed
+        from app.services import resolve_chat
+        result = resolve_chat(db, None, None, None, text, mode="lobby")
+        return {"reply": result.get("narration", "大厅模式已就绪。"), "auto_escape": False, "at_sender": False}
 
     # ── Send pending export files (from plan runner or background tasks) ──
     _pending = (campaign.config or {}).get("pending_exports") or []
