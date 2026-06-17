@@ -24,6 +24,7 @@ from app.qq_bindings import bind_qq, find_binding, find_bindings
 from app.campaign_editor import create_draft, publish_drafts, discard_drafts
 from app.tools.check_tools import CHECK_TOOLS, CHECK_HANDLERS
 from app.tools.combat_tools import COMBAT_TOOLS, COMBAT_HANDLERS
+from app.tools.lobby_tools import LOBBY_TOOLS, LOBBY_HANDLERS
 # Use CampaignSettingDraft query directly for listing drafts
 
 # ── Handler signature ─────────────────────────────────────────────
@@ -1543,7 +1544,10 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "exit_to_lobby": handle_exit_to_lobby,
     "switch_campaign": handle_switch_campaign,
     "read_attachment": handle_read_attachment,
-    "resolve_pending_option": handle_resolve_pending_option,
+    "get_lobby_state": LOBBY_HANDLERS["get_lobby_state"],
+    "set_lobby_state": LOBBY_HANDLERS["set_lobby_state"],
+    "resolve_lobby_option": LOBBY_HANDLERS["resolve_lobby_option"],
+    "create_campaign_now": LOBBY_HANDLERS["create_campaign_now"],
     "complete_character_sheet": handle_complete_character_sheet,
     "execute_plan": handle_execute_plan,
     "generate_cards_from_settings": handle_generate_cards_from_settings,
@@ -1616,11 +1620,10 @@ def tools_for_scope(campaign: Campaign, is_dm: bool, message: str = "") -> list[
     if is_dm:
         allowed |= dm_only_commands
     if style == "lobby":
-        if campaign is None:
-            # No campaign at all → only creation and search tools
-            allowed = {"create_campaign_from_prompt", "spell_search", "resolve_pending_option"}
-        else:
-            allowed = lobby_tools
+        result = [t for t in COMMAND_TOOLS if t["function"]["name"] in allowed and t["function"]["name"] not in slash_only]
+        # Always include lobby tools in lobby mode
+        result.extend(LOBBY_TOOLS)
+        return result
     if style == "dice_assistant":
         allowed -= {"enter_campaign_edit", "exit_campaign_edit",
                      "publish_settings", "discard_settings",
