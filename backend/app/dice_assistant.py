@@ -11,6 +11,7 @@ from app.db.models import Campaign, CampaignEvent, CampaignSummary, Character, T
 from app.services import search_rules, update_character
 from app.llm import chat_completion
 from app.tools.command_tools import TOOL_HANDLERS, tools_for_scope
+from app.tools.hot_character import hot_character_for_llm
 from app.campaign_memory import build_memory_package
 from app.campaign_editor import search_settings
 from app.config import settings
@@ -640,6 +641,7 @@ def resolve_dice_tool_question(
             item for item in memory_package["memories"]
             if narrative_mode or item.get("visibility") != "dm_only"
         ],
+        "hot_character_snapshot": hot_character_for_llm(db, character.id) if character else None,
     }
     output_instructions = _dice_output_instructions(campaign, narrative_mode, combat_active, force_roleplay)
     role_instructions = (

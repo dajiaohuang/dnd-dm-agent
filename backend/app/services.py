@@ -17,6 +17,7 @@ from app.rag.chunker import chunk_markdown
 from app.rag.embedder import embed_text, embed_texts
 from app.llm import chat_completion
 from app.tools.dice import roll_dice, roll_with_advantage
+from app.tools.hot_character import hot_character_for_llm
 from app.tools.spell_catalog import search_spells
 from app.tools.item_schema import CurrencyWallet, normalize_inventory
 from app.tools.effect_engine import advance_effect_durations, normalize_effects, resolve_effective_character
@@ -394,8 +395,15 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
         "Never stop to ask a player to roll dice; state the required roll clearly so the system can "
         f"roll it immediately and continue. {combat_instructions}"
         "When the user asks to drink a potion, take a rest, make a skill check, create a character, "
-        "save a setting, check bindings, or export a sheet, use a function call rather than narrating it."
+        "save a setting, check bindings, or export a sheet, use a function call rather than narrating it. "
+        "When you need to make an ability check or saving throw, call ability_check or saving_throw tools "
+        "with the character's real modifiers — do NOT invent dice results."
     )
+    if character:
+        _hot = hot_character_for_llm(db, character.id)
+        if _hot:
+            import json as _hot_json
+            _sys += f"\n\n[当前角色热数据]\n{_hot_json.dumps(_hot, ensure_ascii=False)}"
     _msgs = [
         {"role": "system", "content": _sys},
         {"role": "system", "content": context_prompt},

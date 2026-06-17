@@ -252,6 +252,21 @@ class CampaignSettingHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
+class DiceAuditLog(Base):
+    """Every dice roll recorded for traceability."""
+    __tablename__ = "dice_audit_log"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    character_id: Mapped[str | None] = mapped_column(String, index=True)
+    roll_formula: Mapped[str] = mapped_column(String)
+    roll_result: Mapped[int] = mapped_column(Integer)
+    roll_detail: Mapped[dict] = mapped_column(JSON)
+    context: Mapped[str] = mapped_column(Text, default="")
+    tool_name: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
 class CampaignSettingComment(Base):
     __tablename__ = "campaign_setting_comments"
 

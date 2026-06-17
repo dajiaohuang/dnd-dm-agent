@@ -6,6 +6,7 @@ from app.campaign_control import campaign_status, command_result, execute_comman
 from app.commands import route_command
 from app.config import settings
 from app.db.models import Campaign, Character
+from sqlalchemy.orm import Session
 from app.services import append_event, serialize
 from app.campaign_memory import build_memory_package
 from app.campaign_turns import (
@@ -13,7 +14,8 @@ from app.campaign_turns import (
 )
 from app.dice_assistant import clear_dice_pending_state, dice_context_action, resolve_dice_assistant
 from app.actor_manager import list_actors, is_present
-from app.tools.combat_tools import COMBAT_TOOLS, COMBAT_HANDLERS
+from app.tools.combat_tools import COMBAT_TOOLS
+from app.tools.hot_character import hot_character_for_llm
 from app.combat_reactions import handle_reaction_response, reaction_window
 from app.qq_bindings import set_active_napcat_campaign, sync_campaign_actor_bindings
 from app.task_sessions import format_ready_reviews, ready_reviews, task_scope
@@ -121,7 +123,7 @@ def process_message(
             if active_actor and active_actor["actor_type"] in {"npc", "monster"} and is_dm:
                 character = db.get(Character, active_actor["character_id"])
             # ── LLM agent with combat tools ──
-            combat_system = _combat_system_prompt(campaign, character)
+            combat_system = _combat_system_prompt(campaign, character, db=db)
             result = execute_llm_with_tools(
                 db, campaign, session_id, character_id, actor_id, is_dm, message,
                 message_context, system_prompt=combat_system,
@@ -231,7 +233,7 @@ def audit_dice_result(
     return result
 
 
-def _combat_system_prompt(campaign: Campaign, character: Character | None, narrative: bool = False) -> str:
+def _combat_system_prompt(campaign: Campaign, character: Character | None, narrative: bool = False, db: Session | None = None) -> str:
     """Build the combat system prompt with D&D 5E rules context."""
     turn_state = (campaign.config or {}).get("turn_state") or {}
     initiative_order = turn_state.get("initiative_order") or []
@@ -250,39 +252,22 @@ def _combat_system_prompt(campaign: Campaign, character: Character | None, narra
             lines.append(f"  {i+1}. {entry.get('name', '?')} (先攻 {entry.get('initiative', '?')}){marker}")
 
     if character:
-        char_data = character.data
-        basic = char_data.get("basic", {})
-        combat_data = char_data.get("combat", {})
-        abilities = char_data.get("abilities", {})
-        spells = char_data.get("spells") or []
-
-        lines.append(f"\n当前行动角色：{character.character_name}")
-        lines.append(f"  职业：{basic.get('classes', [{}])[0].get('name', '?')} Lv{basic.get('classes', [{}])[0].get('level', 1)}")
-        lines.append(f"  HP: {combat_data.get('current_hp', 0)}/{combat_data.get('max_hp', 1)}")
-        lines.append(f"  AC: {combat_data.get('armor_class', 10)}  速度: {combat_data.get('speed', 30)}尺")
-        lines.append(f"  属性: STR{abilities.get('str',10)} DEX{abilities.get('dex',10)} CON{abilities.get('con',10)} INT{abilities.get('int',10)} WIS{abilities.get('wis',10)} CHA{abilities.get('cha',10)}")
-
-        # Equipment
-        inventory = char_data.get("inventory") or []
-        weapons = [i for i in inventory if i.get("item_type") == "weapon" and i.get("equipped")]
-        if weapons:
-            wlist = ", ".join(f"{w.get('name','?')}({w.get('damage','?')})" for w in weapons)
-            lines.append(f"  装备武器：{wlist}")
-
-        # Spellcasting
-        spellcasting = char_data.get("spellcasting", {}) or {}
-        if spellcasting.get("ability"):
-            lines.append(f"  施法能力：{spellcasting['ability']} DC{spellcasting.get('save_dc', 0)} 命中+{spellcasting.get('attack_bonus', 0)}")
-
-        # Prepared spells
-        if spells:
-            spell_list = ", ".join(f"{s.get('name','?')}({s.get('level',0)}环)" for s in spells[:20])
-            lines.append(f"  法术：{spell_list}")
-
-        # Conditions
-        conditions = char_data.get("conditions") or []
-        if conditions:
-            lines.append(f"  状态：{', '.join(conditions)}")
+        import json as _json
+        hot = hot_character_for_llm(db, character.id) if db else None
+        if hot is None and db and hasattr(character, 'data'):
+            # Fallback: use raw data
+            hot = {
+                "character_name": character.character_name,
+                "abilities": {k: {"score": v, "mod": (v//2-5)}
+                    for k, v in (character.data.get("abilities", {}) or {}).items()},
+                "armor_class": (character.data.get("combat", {}) or {}).get("armor_class", 10),
+                "current_hp": (character.data.get("combat", {}) or {}).get("current_hp", 0),
+                "max_hp": (character.data.get("combat", {}) or {}).get("max_hp", 1),
+                "speed": (character.data.get("combat", {}) or {}).get("speed", 30),
+                "saving_throws": {k: v for k, v in ((character.data.get("saving_throws") or {}).items())},
+            }
+        if hot:
+            lines.append(f"\n[当前角色热数据]\n{_json.dumps(hot, ensure_ascii=False)}")
 
     lines.append("""
 战斗规则：
