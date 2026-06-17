@@ -463,6 +463,10 @@ async def napcat_callback(
                 print(f"[export] generated {target}, uploading as {name}", flush=True)
                 if payload.get("message_type") == "group":
                     result = client.upload_group_file(group_id, str(target), name)
+                    try:
+                        client.send_group_at(group_id, user_id, f"角色卡 {name} 已导出。")
+                    except Exception:
+                        pass
                 else:
                     result = client.upload_private_file(user_id, str(target), name)
                 print(f"[export] upload result: {result}", flush=True)

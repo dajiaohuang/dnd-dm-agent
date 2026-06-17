@@ -360,6 +360,88 @@ def export_character_sheet(data: dict, player_name: str, template: Path, target:
     return target
 
 
+def parse_character_sheet_xlsx(file_path: Path) -> dict | None:
+    """Read a filled D&D 5E 人物卡 xlsx and return a character data dict.
+
+    Reads from the same cells that export_character_sheet writes to.
+    Returns None if the file doesn't look like a character sheet template.
+    """
+    from openpyxl import load_workbook as _load
+
+    try:
+        workbook = _load(file_path, data_only=True)
+    except Exception:
+        return None
+
+    # Check it looks like a character sheet (has expected sheets)
+    sheet_names = workbook.sheetnames
+    if "角色" not in sheet_names and "主要情况" not in sheet_names:
+        return None
+
+    identity = workbook["角色"] if "角色" in sheet_names else workbook.worksheets[0]
+    main_sheet = workbook["主要情况"] if "主要情况" in sheet_names else None
+
+    def _cell(ws, coord):
+        try:
+            v = ws[coord].value
+            return str(v).strip() if v is not None else ""
+        except Exception:
+            return ""
+
+    # ── Identity ──
+    result: dict = {
+        "character_name": _cell(identity, "E3") or _cell(identity, "B3"),
+        "player_name": _cell(identity, "E4") or _cell(identity, "B4"),
+        "ancestry": _cell(identity, "E6"),
+        "alignment": _cell(identity, "M6"),
+        "gender": _cell(identity, "E7"),
+        "age": _cell(identity, "M7"),
+        "subrace": _cell(identity, "E8"),
+        "faith": _cell(identity, "M8"),
+        "background": _cell(identity, "E10"),
+        "hair": _cell(identity, "J10"),
+        "height": _cell(identity, "B11"),
+        "skin": _cell(identity, "J11"),
+        "weight": _cell(identity, "B12"),
+        "eyes": _cell(identity, "J12"),
+        "appearance": _cell(identity, "B15"),
+        "traits": _cell(identity, "R15"),
+        "ideals": _cell(identity, "R16"),
+        "bonds": _cell(identity, "R17"),
+        "flaws": _cell(identity, "R18"),
+        "backstory": _cell(identity, "R19"),
+    }
+    if not result["character_name"]:
+        return None
+
+    # ── Main sheet ──
+    if main_sheet:
+        class_name = _cell(main_sheet, "S3")
+        level_str = _cell(main_sheet, "W3")
+        result["class_name"] = class_name or ""
+        try:
+            result["level"] = int(level_str) if level_str else 1
+        except ValueError:
+            result["level"] = 1
+
+        abilities: dict[str, int] = {}
+        ability_cells = {"str": "E8", "dex": "E10", "con": "E12", "int": "E14", "wis": "E16", "cha": "E18"}
+        for key, cell in ability_cells.items():
+            try:
+                v = int(_cell(main_sheet, cell) or 10)
+            except ValueError:
+                v = 10
+            abilities[key] = v
+        result["abilities"] = abilities
+
+        result["max_hp"] = _cell(main_sheet, "AC8") or ""
+        result["armor_class"] = _cell(main_sheet, "P10") or ""
+        result["speed"] = _cell(main_sheet, "AD17") or ""
+        result["spellcasting_ability"] = _cell(main_sheet, "R17") or ""
+
+    return result
+
+
 def set_sheet_value(worksheet, coordinate: str, value) -> None:
     cell = worksheet[coordinate]
     if cell.__class__.__name__ != "MergedCell":

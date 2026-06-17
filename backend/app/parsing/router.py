@@ -178,6 +178,37 @@ def _parse_docx(path: Path, max_chars: int) -> dict:
     return _result_ok(path, "python-docx", text, max_chars)
 
 
+def _parse_xlsx(path: Path, max_chars: int) -> dict:
+    """Parse .xlsx files. Try character sheet import first, fall back to text dump."""
+    from pathlib import Path as _Path
+    from app.tools.character_builder import parse_character_sheet_xlsx
+
+    char_data = parse_character_sheet_xlsx(_Path(path))
+    if char_data:
+        import json as _json_x
+        content = _json_x.dumps(char_data, ensure_ascii=False, indent=2)
+        return _result_ok(path, "xlsx_character_sheet", content, max_chars,
+                          meta={"character_data": char_data})
+
+    # Fall back to openpyxl text extraction
+    from openpyxl import load_workbook as _load_wb
+    try:
+        wb = _load_wb(_Path(path), data_only=True)
+        lines = []
+        for name in wb.sheetnames:
+            ws = wb[name]
+            lines.append(f"=== {name} ===")
+            for row in ws.iter_rows(values_only=True):
+                row_text = " | ".join(str(c) if c is not None else "" for c in row)
+                row_text = row_text.strip(" |")
+                if row_text:
+                    lines.append(row_text)
+            lines.append("")
+        return _result_ok(path, "openpyxl", "\n".join(lines), max_chars)
+    except Exception as exc:
+        return _result_err(path, f"xlsx parse error: {exc}")
+
+
 def _parse_markitdown(path: Path, max_chars: int) -> dict:
     from markitdown import MarkItDown  # type: ignore
 
@@ -522,6 +553,8 @@ def parse_file(
         if _has_module("docx"):
             return _run(lambda: _parse_docx(path, max_chars))
         return _result_err(path, "python-docx backend is not installed; cannot parse .docx/.doc files")
+    if suffix in {".xlsx", ".xlsm", ".xls"}:
+        return _run(lambda: _parse_xlsx(path, max_chars))
     if suffix in TEXT_SUFFIXES:
         return _run(lambda: _parse_text(path, max_chars))
     if suffix == ".zip":
