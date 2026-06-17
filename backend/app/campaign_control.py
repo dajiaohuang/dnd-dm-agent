@@ -485,6 +485,24 @@ def execute_command(
             data={"tip": "use_qq_command"},
         )
 
+    if command.name == "enter_campaign_mode":
+        config = copy.deepcopy(campaign.config or {})
+        config["play_style"] = "campaign"
+        campaign.config = config; db.commit()
+        return command_result("enter_campaign_mode",
+            f"已进入 DM 模式。当前战役: {campaign.name}。")
+
+    if command.name == "exit_to_lobby":
+        config = copy.deepcopy(campaign.config or {})
+        config["play_style"] = "lobby"
+        campaign.config = config; db.commit()
+        return command_result("exit_to_lobby",
+            f"已返回大厅。当前战役: {campaign.name}。")
+
+    if command.name == "switch_campaign":
+        return command_result("switch_campaign",
+            "请说「切换到 战役名」来选择战役。")
+
     if command.name == "export_character_sheet":
         return command_result(
             "export_character_sheet",

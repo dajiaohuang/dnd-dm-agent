@@ -1389,6 +1389,8 @@ def handle_resolve_pending_option(
     db: Session, campaign: Campaign, option_number: int = 0, **_kw: Any,
 ) -> dict:
     """Execute a pending menu option by number."""
+    if campaign is None:
+        return _err("当前没有活跃战役。请先创建战役。")
     pending = (campaign.config or {}).get("pending") or {}
     options = pending.get("options") or []
     if option_number < 1 or option_number > len(options):
@@ -1426,9 +1428,7 @@ def handle_resolve_pending_option(
         campaign.config = cfg; db.commit()
         return _ok("已确认DM身份。")
     elif action == "enter_dm":
-        from app.commands import Command
-        from app.campaign_control import execute_command
-        return execute_command(db, Command("enter_campaign_mode"), campaign, None, None, True, None)
+        return handle_enter_campaign_mode(db=db, campaign=campaign)
     else:
         return _err(f"未知操作: {action}")
 
