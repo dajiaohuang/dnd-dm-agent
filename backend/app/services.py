@@ -380,120 +380,19 @@ def resolve_chat(db: Session, campaign_id: str | None, session_id: str | None, c
     result_data = {}
     actors = [character_id] if character_id else []
 
-    # ── Unified system prompt (Lobby / DM / Dice) ──
-    _combat = bool(((campaign.config or {}).get("turn_state") or {}).get("combat")) if campaign else False
+    # ── Unified prompt assembly via prompt_builder ──
     _temp_map = {"lobby": 0.3, "dm": 0.7, "dice": 0.2}
     temperature = _temp_map.get(mode, 0.7)
-
-    if mode == "lobby":
-        _campaign_info = (
-            f"当前选中战役: {campaign.name}（{campaign.id}）\n"
-            f"简介: {campaign.description or '无'}\n"
-            if campaign else
-            "当前没有选中战役。用户需要先创建或选择战役后才能车卡和改设定。\n"
-        )
-        _campaign_ops = (
-            "- 角色卡: 创建/修改/查看角色卡(默认当前战役)\n"
-            "- 设定: 添加/修改/查看战役设定(当前战役)\n"
-            "- 绑定导出: 绑定QQ/查看绑定/导出角色卡\n"
-            if campaign else
-            "（选战役后才可车卡和改设定）\n"
-        )
-        _attachments = (campaign.config or {}).get("last_attachments") or [] if campaign else []
-        _att_info = ""
-        if _attachments:
-            _att_info = f"\n━━━ 最近附件 ━━━\n收到 {len(_attachments)} 个文件。"
-            for i, a in enumerate(_attachments):
-                meta = a.get("meta", {})
-                ctype = "人物卡" if (isinstance(meta, dict) and "character_data" in meta) else "文档"
-                _att_info += f"\n  [{i+1}] {ctype} ({a.get('parser','?')})"
-            _att_info += "\n用户说「用刚才发的文件开卡」时，调用 read_attachment 读取。\n"
-        _sys = (
-            "你是 D&D 5E 跑团管理助手。当前处于「游戏外模式」——不在游戏中。\n"
-            "你的职责：管理战役、创建角色卡、编辑设定。\n"
-            "用户可以说「进入DM」或「进入骰娘」开始游戏。\n"
-            f"{_att_info}"
-            "\n━━━ 当前战役 ━━━\n"
-            f"{_campaign_info}\n"
-            "━━━ 可用操作 ━━━\n"
-            "- 战役管理: 创建/切换/删除/查看战役\n"
-            f"{_campaign_ops}"
-            "- 查询: 法术搜索\n"
-            "\n"
-            "用户说「进入DM」「进入战役」「进入骰娘」时，如果没有当前战役则提示先选。\n"
-            "用户说「退出」「返回大厅」时，已在 lobby，无需切换。\n"
-            "只输出管理相关信息，禁止编造剧情、扮演、检定、给建议。"
-        )
-    elif mode == "dice":
-        _sys = (
-            "你是 D&D 5E 工具型骰娘。真人 DM 管理战斗，你只负责机械结算。\n"
-            "禁止 NPC 台词、剧情续写、战术建议。需要检定时用 ability_check/saving_throw。\n"
-            "信息不足时追问，记错/撤销用 undo_damage/undo_healing。"
-        )
-        # ── 动态追加战斗指引（仅有战斗迹象时） ──
-        if campaign:
-            _recent_text = " ".join(
-                str(getattr(e, "content", "")) + " " + str(getattr(e, "metadata", {}).get("raw_player_input", ""))
-                for e in (db.scalars(
-                    select(CampaignEvent)
-                    .where(CampaignEvent.campaign_id == campaign.id)
-                    .order_by(CampaignEvent.created_at.desc()).limit(8)
-                ).all()) if e
-            ).lower()
-            _combat_signs = {"先攻", "initiative", "attack", "攻击", "伤害", "damage",
-                             "进入战斗", "start combat", "投掷", "检定", "豁免", "save"}
-            if any(kw.lower() in _recent_text for kw in _combat_signs):
-                _sys += (
-                    "\n\n[战斗感知] 最近事件中出现战斗行动。真人 DM 在管理回合，你可以：\n"
-                    "- 从事件序列推断大致轮到谁，提醒跳过角色或询问轮次\n"
-                    "- 不确定时问「刚才是Aric行动了，现在轮到谁？」\n"
-                    "- 以上全都是建议性的，不强制"
-                )
-                _dm_combat_words = {"进入战斗", "start combat", "管理系统战斗", "系统回合"}
-                if any(kw.lower() in _recent_text for kw in _dm_combat_words):
-                    _sys += (
-                        "\n\n[系统回合制待确认] DM 似乎想进入系统管理。回复：\n"
-                        "「准备进入系统回合制。请确认: 1)哪些角色参战 2)有无先攻优势/劣势？」\n"
-                        "不要自己决定参战者。继续以非管理模式处理，等 DM 确认后再投先攻。"
-                    )
-    else:
-        combat_instr = ""
-        if campaign:
-            combat_instr = (
-                "战斗中允许描写行动结果和 NPC 反应，但禁止虚构机械数值。"
-                if _combat else ""
-            )
-        _sys = (
-            "You are a concise DND Dungeon Master. Continue from established campaign memory. "
-            "Use the current character sheet and relevant rules. Do not invent mechanical state changes. "
-            "Never stop to ask a player to roll dice; state the required roll clearly so the system can "
-            f"roll it immediately and continue. {combat_instr}"
-            "When the user asks to drink a potion, take a rest, make a skill check, create a character, "
-            "save a setting, check bindings, or export a sheet, use a function call rather than narrating it. "
-            "When you need to make an ability check or saving throw, call ability_check or saving_throw tools "
-            "with the character's real modifiers — do NOT invent dice results. "
-            "When an action can use multiple skills (e.g. climbing: Athletics or Acrobatics), "
-            "call ask_clarification to let the player choose which skill to use."
-        )
-    # HotSnapshot: only inject when message likely needs mechanical data
-    if character:
-        _mech_keywords = {"攻击", "attack", "伤害", "damage", "治疗", "heal", "检定", "check",
-                          "豁免", "save", "属性", "ability", "技能", "skill", "法术", "spell",
-                          "施法", "cast", "HP", "AC", "先攻", "initiative", "力量", "敏捷",
-                          "体质", "智力", "感知", "魅力", "str", "dex", "con", "int", "wis", "cha",
-                          "熟练", "proficiency", "长剑", "武器", "weapon", "护甲", "armor",
-                          "状态", "condition", "效果", "effect", "车卡", "角色卡", "sheet"}
-        _msg_lower = message.lower()
-        if any(kw.lower() in _msg_lower for kw in _mech_keywords):
-            _hot = hot_character_for_llm(db, character.id)
-            if _hot:
-                import json as _hot_json
-                _sys += f"\n\n[当前角色热数据]\n{_hot_json.dumps(_hot, ensure_ascii=False)}"
-    _msgs = [
-        {"role": "system", "content": _sys},
+    from app.prompt_builder import build_system_prompt
+    _system_msgs = build_system_prompt(
+        mode=mode, campaign=campaign, character=character, message=message, db=db,
+    )
+    _msgs = _system_msgs + [
+        {"role": "system", "content": context_prompt},
         {"role": "system", "content": context_prompt},
         {"role": "user", "content": message},
     ]
+    _combat = bool(((campaign.config or {}).get("turn_state") or {}).get("combat")) if campaign else False
     _fallback_text = (
         "行动已记录，未产生可确认的机械状态变化。"
         if _combat

@@ -240,60 +240,10 @@ def audit_dice_result(
 
 
 def _combat_system_prompt(campaign: Campaign, character: Character | None, narrative: bool = False, db: Session | None = None) -> str:
-    """Build the combat system prompt with D&D 5E rules context."""
-    turn_state = (campaign.config or {}).get("turn_state") or {}
-    initiative_order = turn_state.get("initiative_order") or []
-    current_idx = turn_state.get("current_turn_index", 0)
-    combat_round = turn_state.get("round", 1)
+    """Delegate to unified prompt builder."""
+    from app.prompt_builder import build_system_prompt
+    msgs = build_system_prompt(mode="dice" if not narrative else "dm", campaign=campaign,
+                                character=character, db=db, turn_based=True, narrative_mode=narrative)
+    return msgs[0]["content"] if msgs else "战斗系统提示词构建失败。"
 
-    lines = [
-        "你是 D&D 5E 地下城主的战斗规则引擎。" if narrative else "你是 D&D 5E 骰娘，负责战斗结算。",
-        f"当前第 {combat_round} 轮。",
-    ]
 
-    if initiative_order:
-        lines.append("先攻顺序：")
-        for i, entry in enumerate(initiative_order):
-            marker = " ← 当前" if i == current_idx else ""
-            lines.append(f"  {i+1}. {entry.get('name', '?')} (先攻 {entry.get('initiative', '?')}){marker}")
-
-    if character:
-        import json as _json
-        hot = hot_character_for_llm(db, character.id) if db else None
-        if hot is None and db and hasattr(character, 'data'):
-            # Fallback: use raw data
-            hot = {
-                "character_name": character.character_name,
-                "abilities": {k: {"score": v, "mod": (v//2-5)}
-                    for k, v in (character.data.get("abilities", {}) or {}).items()},
-                "armor_class": (character.data.get("combat", {}) or {}).get("armor_class", 10),
-                "current_hp": (character.data.get("combat", {}) or {}).get("current_hp", 0),
-                "max_hp": (character.data.get("combat", {}) or {}).get("max_hp", 1),
-                "speed": (character.data.get("combat", {}) or {}).get("speed", 30),
-                "saving_throws": {k: v for k, v in ((character.data.get("saving_throws") or {}).items())},
-            }
-        if hot:
-            lines.append(f"\n[当前角色热数据]\n{_json.dumps(hot, ensure_ascii=False)}")
-
-    # ── Action quota ──
-    if db:
-        actions = get_actions_remaining(campaign)
-        lines.append(f"\n当前回合剩余动作配额: {format_actions_remaining(campaign)}")
-    else:
-        actions = {"main_action": 1, "bonus_action": 1, "reaction": 1, "movement": 30, "extra_actions": 0}
-
-    lines.append("""
-战斗规则:
-- 每个行动调用对应工具，系统自动扣除动作配额
-- 主动作: 攻击/施法/疾走/撤退/闪避 (main_action)
-- 附赠动作: 双武器副手/灵巧施法 (bonus_action)
-- 动作如潮: 使用 use_feature("action_surge") 获得额外动作
-- 配额用完后提醒用户结束回合，或建议可用的附赠/移动
-- 用户说「结束回合」时调用 end_turn 工具
-- 用户会用自然语言描述行动，你需要调用对应工具
-- 信息不足时调用 ask_clarification 追问，不要猜测
-- 追问示例：用哪个法术？几环？目标是谁？用动作还是附赠动作？
-- 攻击检定=d20+熟练+属性调整，伤害=武器骰+属性调整
-- 法术DC=8+熟练+施法属性调整
-- 只结算当前行动者请求的动作，不要替其他角色行动""")
-    return "\n".join(lines)
