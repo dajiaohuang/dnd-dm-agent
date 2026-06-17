@@ -1073,10 +1073,31 @@ def _via_execute_command(command_name: str):
                              system_version="DND_5E_2014", config=cfg)
             db.add(campaign); db.commit()
         elif campaign_name and command_name == "create_campaign_from_prompt":
+            # Check if DM is confirmed — if not, save to pending, don't create yet
+            pending = (campaign.config or {}).get("pending") or {}
+            if not pending.get("dm_user_id"):
+                cfg = copy.deepcopy(campaign.config or {})
+                cfg["pending"] = {
+                    "campaign_setting": {"name": campaign_name, "description": description or ""},
+                    "options": [
+                        {"id": 1, "action": "create_campaign", "label": f"我是DM — 创建战役「{campaign_name}」"},
+                        {"id": 2, "action": "regenerate", "label": "重新随机生成"},
+                    ],
+                }
+                campaign.config = cfg; db.commit()
+                return _ok(
+                    f"战役设定已生成！\n\n🎮 战役名称：{campaign_name}\n"
+                    + (f"📜 设定概要：{description}\n\n" if description else "\n")
+                    + "⚠️ 当前尚未确认 DM 身份。请选择：\n"
+                    + f"[1] 我是DM — 创建战役「{campaign_name}」\n"
+                    + "[2] 重新随机生成"
+                )
+            # DM confirmed → create immediately
             cfg = copy.deepcopy(campaign.config or {})
             cfg["pending_generated_campaign_name"] = campaign_name
             if description:
                 cfg["pending_generated_campaign_description"] = description
+            cfg.pop("pending", None)
             campaign.config = cfg; db.commit()
         return execute_command(
             db, Command(command_name), campaign,
@@ -1404,10 +1425,12 @@ def handle_resolve_pending_option(
         desc = cs.get("description", "")
         from app.commands import Command
         from app.campaign_control import execute_command
-        # Inject name into campaign config
         cfg = copy.deepcopy(campaign.config or {})
         cfg["pending_generated_campaign_name"] = name
         cfg["pending_generated_campaign_description"] = desc
+        # User picking "我是DM" implicitly confirms DM identity
+        if not cfg.get("pending", {}).get("dm_user_id"):
+            cfg.setdefault("pending", {})["dm_user_id"] = "confirmed"
         cfg.pop("pending", None)
         campaign.config = cfg; db.commit()
         return execute_command(db, Command("create_campaign_from_prompt"), campaign, None, None, True, None)
