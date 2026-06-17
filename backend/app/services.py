@@ -9,7 +9,6 @@ from sqlalchemy import delete, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.agents.dm_graph import dm_graph
 from app.db.models import (Campaign, CampaignEvent, CampaignSummary, Character,
                            CharacterChange, CompendiumEntry, RuleChunk)
 from app.campaign_memory import build_memory_package, index_event_memory
@@ -375,13 +374,6 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
     campaign = db.get(Campaign, campaign_id)
     character = db.get(Character, character_id) if character_id else None
     context_prompt, context_refs = build_dm_context(db, campaign_id, session_id, character, message)
-    memory_package = build_memory_package(db, campaign_id, message, session_id)
-    graph_state = dm_graph.invoke({
-        "user_message": message,
-        "dm_context": context_prompt,
-        "memory_context": memory_package,
-        "errors": [],
-    })
     text = message.lower()
     rolls, changes = [], []
     result_data = {}
@@ -500,11 +492,10 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
         requested_formula = _requested_roll(narration)
 
     metadata = {"raw_player_input": message, "dm_response": narration, "rolls": rolls, "state_changes": changes,
-                "intent": graph_state.get("intent"), "ruling": graph_state.get("ruling"),
-                "proposed_actions": graph_state.get("proposed_actions"), "context_refs": context_refs}
+                "context_refs": context_refs}
     event = append_event(
         db, campaign_id, session_id, "player_action", message, actors, metadata,
-        memory_plan=graph_state.get("memory_write_plan"),
+        memory_plan={"extract_after_event": True, "intent_type": "dm_narrative", "skip": False},
     )
     return {"campaign_id": campaign_id, "message": message, "narration": narration,
             "data": result_data, "rolls": rolls, "state_changes": changes, "events": [serialize(event)]}
