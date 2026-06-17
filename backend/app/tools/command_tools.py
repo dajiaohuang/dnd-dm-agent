@@ -1058,7 +1058,7 @@ def _via_execute_command(command_name: str):
     def handler(db: Session, campaign: Campaign, is_dm: bool = False,
                 session_id: str = None, actor_id: str = None,
                 message_context: dict = None,
-                campaign_name: str = "", **_kw: Any) -> dict:
+                campaign_name: str = "", description: str = "", **_kw: Any) -> dict:
         from app.commands import Command
         from app.campaign_control import execute_command
         if campaign is None:
@@ -1067,13 +1067,16 @@ def _via_execute_command(command_name: str):
             cfg = {"play_style": "lobby"}
             if campaign_name:
                 cfg["pending_generated_campaign_name"] = campaign_name
+            if description:
+                cfg["pending_generated_campaign_description"] = description
             campaign = _Camp(id=_uid("camp"), name=campaign_name or "占位",
                              system_version="DND_5E_2014", config=cfg)
             db.add(campaign); db.commit()
         elif campaign_name and command_name == "create_campaign_from_prompt":
-            # Inject LLM-provided name into campaign config
             cfg = copy.deepcopy(campaign.config or {})
             cfg["pending_generated_campaign_name"] = campaign_name
+            if description:
+                cfg["pending_generated_campaign_description"] = description
             campaign.config = cfg; db.commit()
         return execute_command(
             db, Command(command_name), campaign,
