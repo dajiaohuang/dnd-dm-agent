@@ -369,14 +369,15 @@ def build_dm_context(
     return prompt, refs
 
 
-def resolve_chat(db: Session, campaign_id: str, session_id: str | None, character_id: str | None,
+def resolve_chat(db: Session, campaign_id: str | None, session_id: str | None, character_id: str | None,
                  message: str, *, mode: str = "dm") -> dict:
-    """Unified DM narrative / dice assistant LLM path.
+    """Unified DM narrative / dice assistant / lobby LLM path.
 
-    mode="dm"   → full DM: narration, NPC roleplay, combat description
-    mode="dice" → dice assistant: pure mechanics, no roleplay, no advice
+    mode="lobby" → game-external: campaign management, character creation
+    mode="dm"    → full DM: narration, NPC roleplay, combat description
+    mode="dice"  → dice assistant: pure mechanics, no roleplay, no advice
     """
-    campaign = db.get(Campaign, campaign_id)
+    campaign = db.get(Campaign, campaign_id) if campaign_id else None
     character = db.get(Character, character_id) if character_id else None
     context_prompt, context_refs = build_dm_context(db, campaign_id, session_id, character, message)
     text = message.lower()
@@ -384,11 +385,41 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
     result_data = {}
     actors = [character_id] if character_id else []
 
-    # ── Unified system prompt (DM / Dice) ──
-    _combat = bool(((campaign.config or {}).get("turn_state") or {}).get("combat"))
-    temperature = 0.7 if mode == "dm" else 0.2
+    # ── Unified system prompt (Lobby / DM / Dice) ──
+    _combat = bool(((campaign.config or {}).get("turn_state") or {}).get("combat")) if campaign else False
+    _temp_map = {"lobby": 0.3, "dm": 0.7, "dice": 0.2}
+    temperature = _temp_map.get(mode, 0.7)
 
-    if mode == "dice":
+    if mode == "lobby":
+        _campaign_info = (
+            f"当前选中战役: {campaign.name}（{campaign.id}）\n"
+            f"简介: {campaign.description or '无'}\n"
+            if campaign else
+            "当前没有选中战役。用户需要先创建或选择战役后才能车卡和改设定。\n"
+        )
+        _campaign_ops = (
+            "- 角色卡: 创建/修改/查看角色卡(默认当前战役)\n"
+            "- 设定: 添加/修改/查看战役设定(当前战役)\n"
+            "- 绑定导出: 绑定QQ/查看绑定/导出角色卡\n"
+            if campaign else
+            "（选战役后才可车卡和改设定）\n"
+        )
+        _sys = (
+            "你是 D&D 5E 跑团管理助手。当前处于「游戏外模式」——不在游戏中。\n"
+            "你的职责：管理战役、创建角色卡、编辑设定。\n"
+            "用户可以说「进入DM」或「进入骰娘」开始游戏。\n"
+            "\n━━━ 当前战役 ━━━\n"
+            f"{_campaign_info}\n"
+            "━━━ 可用操作 ━━━\n"
+            "- 战役管理: 创建/切换/删除/查看战役\n"
+            f"{_campaign_ops}"
+            "- 查询: 法术搜索\n"
+            "\n"
+            "用户说「进入DM」「进入战役」「进入骰娘」时，如果没有当前战役则提示先选。\n"
+            "用户说「退出」「返回大厅」时，已在 lobby，无需切换。\n"
+            "只输出管理相关信息，禁止编造剧情、扮演、检定、给建议。"
+        )
+    elif mode == "dice":
         _sys = (
             "你是桌面跑团的工具型骰娘。你不在系统回合制模式下——真人 DM 在管理战斗。\n"
             "你的核心职责：读取角色热数据 → 投骰 → 结算 → 写回数据库。\n"

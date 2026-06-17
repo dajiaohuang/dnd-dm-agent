@@ -1009,6 +1009,47 @@ def _via_execute_command(command_name: str):
         )
     return handler
 
+def handle_enter_campaign_mode(
+    db: Session, campaign: Campaign, **_kw: Any,
+) -> dict:
+    """Enter DM campaign mode from lobby."""
+    config = copy.deepcopy(campaign.config or {})
+    config["play_style"] = "campaign"
+    config.pop("dice_dm_confirmation_pending", None)
+    campaign.config = config
+    db.commit()
+    return _ok(f"已进入 DM 模式。当前战役: {campaign.name}。\n发送 /退出 返回大厅。")
+
+def handle_exit_to_lobby(
+    db: Session, campaign: Campaign, **_kw: Any,
+) -> dict:
+    """Exit current mode to lobby."""
+    config = copy.deepcopy(campaign.config or {})
+    config["play_style"] = "lobby"
+    config.pop("dice_dm_confirmation_pending", None)
+    campaign.config = config
+    db.commit()
+    return _ok(f"已返回大厅。当前战役: {campaign.name}。\n发送 /进入DM 或 /进入骰娘 开始游戏。")
+
+def handle_switch_campaign(
+    db: Session, campaign: Campaign,
+    campaign_name: str = "", **_kw: Any,
+) -> dict:
+    """Switch to a different campaign."""
+    from sqlalchemy import select as _sel
+    from app.qq_bindings import set_active_napcat_campaign
+    if not campaign_name.strip():
+        return _err("请提供战役名称。")
+    target = db.scalar(_sel(Campaign).where(Campaign.name == campaign_name.strip()))
+    if not target:
+        target = db.scalar(_sel(Campaign).where(Campaign.id == campaign_name.strip()))
+    if not target:
+        all_campaigns = db.scalars(_sel(Campaign)).all()
+        names = "、".join(c.name for c in all_campaigns[:10])
+        return _err(f"未找到战役「{campaign_name}」。当前战役: {names}")
+    set_active_napcat_campaign(db, target)
+    return _ok(f"已切换到战役: {target.name}（{target.id}）")
+
 _DELEGATED = [
     "save", "pause", "resume",
     "enter_turn_mode", "exit_turn_mode",
@@ -1020,6 +1061,7 @@ _DELEGATED = [
     "enable_combat_roleplay", "disable_combat_roleplay",
     "create_npc_cards_from_settings",
     "memory_search", "spell_search",
+    "enter_campaign_mode", "exit_to_lobby", "switch_campaign",
 ]
 _DELEGATED_HANDLERS = {name: _via_execute_command(name) for name in _DELEGATED}
 
@@ -1070,6 +1112,10 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "use_feature": COMBAT_HANDLERS["use_feature"],
     "end_turn": COMBAT_HANDLERS["end_turn"],
     "turn_status": COMBAT_HANDLERS["turn_status"],
+    # Lobby mode tools
+    "enter_campaign_mode": handle_enter_campaign_mode,
+    "exit_to_lobby": handle_exit_to_lobby,
+    "switch_campaign": handle_switch_campaign,
     # Delegated to execute_command
     **_DELEGATED_HANDLERS,
 }
@@ -1109,9 +1155,26 @@ def tools_for_scope(campaign: Campaign, is_dm: bool) -> list[dict[str, Any]]:
         "create_npc_quick",
     }
 
+    # ── Lobby mode: limited tool set ──
+    lobby_tools = {
+        "status", "create_campaign_from_prompt", "delete_active_campaign",
+        "create_character_quick", "create_character_draft",
+        "update_character_draft", "show_character_draft",
+        "commit_character_draft", "cancel_character_draft",
+        "create_npc_quick",
+        "save_campaign_setting", "create_setting_draft",
+        "show_setting_drafts", "publish_setting_drafts", "discard_setting_drafts",
+        "list_setting_drafts", "validate_settings",
+        "bind_character", "show_bindings",
+        "export_character_sheet",
+        "spell_search", "memory_search",
+    }
+
     allowed: set[str] = set(always_available)
     if is_dm:
         allowed |= dm_only_commands
+    if style == "lobby":
+        allowed = lobby_tools  # lobby always has the same set, DM or not
     if style == "dice_assistant":
         allowed -= {"enter_campaign_edit", "exit_campaign_edit",
                      "publish_settings", "discard_settings",
@@ -1125,8 +1188,8 @@ def tools_for_scope(campaign: Campaign, is_dm: bool) -> list[dict[str, Any]]:
         allowed |= {"next_turn", "start_combat", "end_combat"}
 
     result = [t for t in COMMAND_TOOLS if t["function"]["name"] in allowed and t["function"]["name"] not in slash_only]
-    # Always include check tools and combat tools (they have their own access control)
-    result.extend(CHECK_TOOLS)
-    # Combat tools: filter out ask_clarification (slash-only)
-    result.extend([t for t in COMBAT_TOOLS if t["function"]["name"] not in slash_only])
+    # Check and combat tools only in game modes (not lobby)
+    if style != "lobby":
+        result.extend(CHECK_TOOLS)
+        result.extend([t for t in COMBAT_TOOLS if t["function"]["name"] not in slash_only])
     return result
