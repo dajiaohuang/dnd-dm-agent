@@ -1253,6 +1253,66 @@ def handle_generate_setting(
     return _ok(f"后台开始生成 {category} 设定（{count} 个）。完成后自动通知。")
 
 
+
+def handle_generate_content(
+    db: Session, campaign: Campaign,
+    type: str = "", count: int = 1, theme: str = "", prompt: str = "",
+    batch_size: int = 6,
+    **_kw: Any,
+) -> dict:
+    """Unified content generation tool. Dispatches to background subagent."""
+    valid_types = {"npc", "location", "faction", "item", "event",
+                   "quest", "encounter", "loot", "rumor", "recap", "prep"}
+    if type not in valid_types:
+        return _err(f"type must be one of: {', '.join(sorted(valid_types))}")
+    if count < 1:
+        return _err("count >= 1")
+
+    from app.db.models import TaskSession
+    from app.services import uid
+    from app.subagent_runner import enqueue_subagent_task
+
+    if type == "npc":
+        batch_size = max(3, min(batch_size, 8))
+        batches = (count + batch_size - 1) // batch_size
+        task_ids = []
+        for b in range(batches):
+            start = b * batch_size
+            task = TaskSession(
+                id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
+                platform="system", chat_id=None, owner_user_id=None, session_id=None,
+                status="queued", priority=2, draft_data={},
+                proposal_data={
+                    "agent_role": "content_writer",
+                    "proposal": {
+                        "type": "npc", "batch_start": start, "batch_size": batch_size,
+                        "total_count": count, "theme": theme or campaign.name,
+                        "create_cards": True,
+                    },
+                },
+                missing_fields=[], next_prompt=f"NPC {start+1}-{min(start+batch_size, count)}",
+            )
+            db.add(task); task_ids.append(task.id)
+        db.commit()
+        for tid in task_ids:
+            enqueue_subagent_task(tid)
+        return _ok(f"后台生成 {count} NPC（{batches}批×{batch_size}）。完成后通知。")
+    else:
+        task = TaskSession(
+            id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
+            platform="system", chat_id=None, owner_user_id=None, session_id=None,
+            status="queued", priority=2, draft_data={},
+            proposal_data={
+                "agent_role": "content_writer",
+                "proposal": {"type": type, "count": count, "theme": theme or campaign.name, "prompt": prompt},
+            },
+            missing_fields=[], next_prompt=f"{type} x{count}",
+        )
+        db.add(task); db.commit()
+        enqueue_subagent_task(task.id)
+        return _ok(f"后台生成 {type}（{count}个）。完成后通知。")
+
+
 def handle_switch_campaign(
     db: Session, campaign: Campaign,
     campaign_name: str = "", **_kw: Any,
@@ -1342,6 +1402,7 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "complete_character_sheet": handle_complete_character_sheet,
     "generate_cards_from_settings": handle_generate_cards_from_settings,
     "generate_npc_set": handle_generate_npc_set,
+    "generate_content": handle_generate_content,
     "generate_setting": handle_generate_setting,
     "check_background_tasks": handle_check_background_tasks,
     # Delegated to execute_command
