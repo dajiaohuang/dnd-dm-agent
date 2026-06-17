@@ -42,18 +42,14 @@ def run_subagent_task(task_id: str) -> None:
                 result = review_character_sheet(db, campaign, proposal_data)
             elif role == "character_sheet_completer":
                 result = complete_character_sheet(db, campaign, proposal_data)
-            elif role == "npc_batch_worker":
-                result = generate_npc_batch(db, campaign, proposal_data)
             elif role == "content_writer":
                 result = generate_content(db, campaign, proposal_data)
-            elif role == "plan_step":
-                result = execute_plan_step(db, campaign, proposal_data)
             elif role == "plan_runner":
                 result = run_plan(db, campaign, proposal_data)
             elif role == "campaign_compressor":
                 result = compress_campaign_events(db, campaign, proposal_data)
             else:
-                result = generic_review(campaign, proposal_data)
+                result = {"kind": "unknown_role", "error": f"unknown agent_role: {role}"}
             proposal_data["result"] = result
             proposal_data["completed_at"] = datetime.now(UTC).isoformat()
             parent = db.get(TaskSession, task.parent_task_id) if task.parent_task_id else None
@@ -368,27 +364,12 @@ import json as _plan_json
 _PLAN_POLL_SLEEP = 2  # seconds between dependency checks
 
 
-def execute_plan_step(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
-    """Execute a single plan step by calling its tool handler synchronously."""
-    from app.tools.command_tools import TOOL_HANDLERS
-    proposal = proposal_data.get("proposal") or {}
-    step = proposal.get("plan_step") or {}
-    args = dict(proposal.get("resolved_args") or {})
-    tool_name = str(step.get("tool", ""))
-
-    if tool_name in TOOL_HANDLERS:
-        handler = TOOL_HANDLERS[tool_name]
-        args["db"] = db
-        args["campaign"] = campaign
-        try:
-            return handler(**args)
-        except Exception as exc:
-            return {"error": str(exc), "tool": tool_name}
-    return {"error": f"unknown tool: {tool_name}"}
-
-
 def run_plan(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
-    """Coordinator subagent: enqueue plan steps as subagent tasks, wait for deps, chain results."""
+    """Coordinator subagent: execute plan steps synchronously in sequence.
+
+    Each step runs in the plan runner's own thread — no sub-subagent enqueuing.
+    Depends-on ordering: steps with unmet deps are skipped until later passes.
+    """
     from app.tools.command_tools import TOOL_HANDLERS
     proposal = proposal_data.get("proposal") or {}
     plan = proposal.get("plan") or {}
@@ -396,97 +377,55 @@ def run_plan(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str,
     if not steps:
         return {"kind": "plan_completed", "summary": "no steps", "steps": 0}
 
-    step_records: dict[str, dict] = {}   # step_id → {task_id, status, result}
-    step_defs: dict[str, dict] = {}       # step_id → step definition
-    completed: set[str] = set()
+    step_results: dict[str, dict] = {}
+    step_defs: dict[str, dict] = {str(s.get("id","")): s for s in steps if s.get("id")}
+    remaining = set(step_defs.keys())
+    max_rounds = len(steps) * 3
 
-    for s in steps:
-        sid = str(s.get("id", ""))
-        if sid:
-            step_defs[sid] = s
-
-    # ── Helper: enqueue a step as a subagent task ──
-    def _enqueue_step(sid: str) -> str:
-        s = step_defs[sid]
-        # Resolve args from dependencies
-        args = dict(s.get("args") or {})
-        for dep_id in s.get("depends_on") or []:
-            dep_rec = step_records.get(dep_id, {})
-            dep_result = dep_rec.get("result") or {}
-            key = (step_defs.get(dep_id) or {}).get("output_key", "")
-            if key and key in dep_result:
-                args[key] = dep_result[key]
-
-        # For tools that are command handlers, wrap in subagent
-        tool_name = str(s.get("tool", ""))
-        task = TaskSession(
-            id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
-            platform="system", chat_id=None, owner_user_id=None, session_id=None,
-            status="queued", priority=2, draft_data={},
-            proposal_data={
-                "agent_role": "generic_review" if tool_name not in TOOL_HANDLERS else "plan_step",
-                "proposal": {"plan_step": s, "resolved_args": args},
-            },
-            missing_fields=[], next_prompt=f"Plan step: {sid} {tool_name}",
-        )
-        db.add(task); db.commit()
-        enqueue_subagent_task(task.id)
-        step_records[sid] = {"task_id": task.id, "status": "queued", "result": {}}
-        return task.id
-
-    # ── Phase 1: Enqueue steps with no dependencies ──
-    for sid, s in step_defs.items():
-        if not s.get("depends_on"):
-            _enqueue_step(sid)
-
-    # ── Phase 2: Poll and chain ──
-    max_rounds = len(steps) * 5  # safety limit
-    for _round in range(max_rounds):
-        if len(completed) >= len(steps):
+    for _pass in range(max_rounds):
+        if not remaining:
             break
+        # Find steps whose deps are all resolved
+        ready = []
+        for sid in list(remaining):
+            deps = step_defs[sid].get("depends_on") or []
+            if all(d in step_results for d in deps):
+                ready.append(sid)
+        if not ready:
+            _time.sleep(_PLAN_POLL_SLEEP)
+            continue
 
-        # Check outstanding tasks
-        for sid, rec in list(step_records.items()):
-            if sid in completed:
-                continue
-            tid = rec.get("task_id")
-            if not tid:
-                continue
-            task = db.get(TaskSession, tid)
-            if not task:
-                continue
-            if task.status == "ready_to_review":
-                # Step completed — extract result
-                rec["result"] = (task.proposal_data or {}).get("result") or {}
-                rec["status"] = "done"
-                task.status = "notified"
-                completed.add(sid)
-            elif task.status in ("failed",):
-                rec["status"] = "failed"
-                completed.add(sid)
+        for sid in ready:
+            s = step_defs[sid]
+            # Resolve args from previous step outputs
+            args = dict(s.get("args") or {})
+            for dep_id in s.get("depends_on") or []:
+                dep_out = step_results.get(dep_id, {})
+                key = (step_defs.get(dep_id) or {}).get("output_key", "")
+                if key and key in dep_out:
+                    args[key] = dep_out[key]
 
-        # Enqueue newly-ready steps
-        for sid, s in step_defs.items():
-            if sid in [r.get("task_id") for r in step_records.values() if r.get("task_id")] or sid in completed:
-                # Already enqueued or done — skip
-                pass
-            else:
-                deps = s.get("depends_on") or []
-                if all(d in completed for d in deps):
-                    _enqueue_step(sid)
+            tool_name = str(s.get("tool", ""))
+            try:
+                if tool_name in TOOL_HANDLERS:
+                    result = TOOL_HANDLERS[tool_name](db=db, campaign=campaign, **args)
+                elif tool_name == "complete_character_sheet":
+                    result = complete_character_sheet(db, campaign, {"proposal": args})
+                else:
+                    result = {"error": f"unknown tool: {tool_name}"}
+            except Exception as exc:
+                result = {"error": str(exc)}
 
-        # Update progress
-        proposal_data["progress"] = f"{len(completed)}/{len(steps)}"
-        db.commit()
-        _time.sleep(_PLAN_POLL_SLEEP)
+            step_results[sid] = result
+            remaining.discard(sid)
+            proposal_data["progress"] = f"{len(step_results)}/{len(steps)}"
+            db.commit()
 
-    # ── Phase 3: Report ──
-    successes = sum(1 for r in step_records.values() if r.get("status") == "done")
     return {
         "kind": "plan_completed",
         "steps_total": len(steps),
-        "steps_done": successes,
-        "step_results": {sid: rec.get("result", {}) for sid, rec in step_records.items()},
+        "steps_done": len(step_results),
+        "step_results": {sid: r for sid, r in step_results.items()},
     }
 
 
