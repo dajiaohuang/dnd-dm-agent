@@ -43,12 +43,14 @@ def _base_role(
         return (
             "你是 D&D 5E 跑团管理助手。当前处于「游戏外模式」。\n"
             "职责：管理战役、创建角色卡、编辑设定。\n"
-            "用户说「创建战役」时，调用 create_campaign_from_prompt 工具。\n"
+            "用户说「创建战役」或「随机设定创建战役」时，调用 create_campaign_from_prompt 工具。\n"
             "用户说「进入DM」或「进入骰娘」开始游戏。\n"
+            + (_pending_block(campaign) if campaign else "") +
             f"\n━━━ 当前战役 ━━━\n{info}\n"
             f"━━━ 操作 ━━━\n- 战役管理: 创建/切换/删除/查看战役\n{ops}"
             "- 查询: 法术搜索\n"
             "无当前战役时只可创建战役。进入DM/骰娘需先有当前战役。\n"
+            "如果用户用数字回复(如1/2/3)，说明他们在选上一个选项，调用 resolve_pending_option。"
             "只输出管理信息，禁止剧情、扮演、检定、建议。"
         )
 
@@ -251,6 +253,28 @@ def _pending_tasks(db: Session | None, campaign: Campaign | None, message: str =
     if not reviews:
         return ""
     return f"[后台任务完成待通知]\n{format_ready_reviews(reviews)}\n在回复中自然地告知用户。"
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Module: PENDING STATE (lobby mode)
+# ═══════════════════════════════════════════════════════════════════
+
+def _pending_block(campaign) -> str:
+    """Show pending state (campaign setting, DM identity, options)."""
+    pending = (campaign.config or {}).get("pending") or {}
+    if not pending:
+        return ""
+    lines = ["\n[待处理状态]"]
+    if pending.get("campaign_setting"):
+        cs = pending["campaign_setting"]
+        lines.append(f"  待创建战役: {cs.get('name','?')} — {cs.get('description','')[:80]}")
+    if pending.get("dm_user_id"):
+        lines.append(f"  DM已确认: QQ {pending['dm_user_id']}")
+    if pending.get("options"):
+        lines.append("  待选选项:")
+        for opt in pending["options"]:
+            lines.append(f"    [{opt['id']}] {opt['label']}")
+    return "\n".join(lines) + "\n"
 
 
 # ═══════════════════════════════════════════════════════════════════
