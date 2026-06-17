@@ -1024,6 +1024,9 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "apply_condition": CHECK_HANDLERS["apply_condition"],
     "remove_condition": CHECK_HANDLERS["remove_condition"],
     "get_character_snapshot": CHECK_HANDLERS["get_character_snapshot"],
+    "undo_damage": CHECK_HANDLERS["undo_damage"],
+    "undo_healing": CHECK_HANDLERS["undo_healing"],
+    "recent_changes": CHECK_HANDLERS["recent_changes"],
     # Combat tools (from combat_tools.py)
     "combat_attack": COMBAT_HANDLERS["combat_attack"],
     "combat_cast_spell": COMBAT_HANDLERS["combat_cast_spell"],

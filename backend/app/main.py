@@ -139,6 +139,12 @@ async def napcat_callback(
         return {"ok": True, "ignored": "unsupported_event"}
     if not is_allowed(payload):
         return {"ok": True, "ignored": "user_not_allowed"}
+
+    # ── 骰子被动监听：纯骰子公式无需 @ 也能触发 ──
+    dice_passive = _handle_dice_passive(payload, client)
+    if dice_passive:
+        return dice_passive
+
     if (payload.get("message_type") == "group" and settings.napcat_require_group_at
             and not is_group_at_event(payload, client.self_id)):
         return {"ok": True, "ignored": "group_message_without_at"}
@@ -1313,3 +1319,40 @@ def demo_character() -> dict:
         ],
         "conditions": [], "notes": {}, "integrations": {"qq_user_ids": []},
     })
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Dice passive listener — roll pure dice notation without @mention
+# ═══════════════════════════════════════════════════════════════════
+
+import re as _re
+
+_PURE_DICE_RE = _re.compile(r"^\s*(\d*d\d+(?:\s*[+-]\s*\d+)?)\s*$", _re.IGNORECASE)
+
+
+def _handle_dice_passive(payload: dict, client) -> dict | None:
+    """If the message is a pure dice formula, roll it and @ the sender."""
+    text = parse_event_text(payload, client.self_id).strip()
+    if not text:
+        return None
+    match = _PURE_DICE_RE.match(text)
+    if not match:
+        return None
+    formula = _re.sub(r"\s+", "", match.group(1))
+    from app.tools.dice import roll_dice
+    try:
+        result = roll_dice(formula)
+    except ValueError:
+        return None
+    user_id = str(payload.get("user_id", "")).strip()
+    reply = f"🎲 {formula} = {result['total']} [{', '.join(map(str, result['rolls']))}]"
+    if result.get("modifier", 0) != 0:
+        reply += f"{result['modifier']:+d}"
+    if payload.get("message_type") == "group":
+        try:
+            client.send_group_at(payload["group_id"], user_id, reply)
+        except Exception:
+            client.send_group_msg(payload["group_id"], reply)
+    else:
+        client.send_private_msg(user_id, reply)
+    return {"ok": True, "kind": "dice_passive", "formula": formula, "result": result["total"]}

@@ -399,6 +399,8 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
             "信息不足时只列出缺少的字段。"
             "当行动可选择多种技能时（如攀爬可用运动或体操），调用 ask_clarification 让玩家选择。"
             "需要检定时调用 ability_check 或 saving_throw 工具，禁止编造投骰结果。"
+            "当用户说记错了、撤销、回退、上次不算时，调用 undo_damage 或 undo_healing 工具。"
+            "当用户问最近变更记录时，调用 recent_changes 工具。"
         )
     else:
         combat_instr = ""

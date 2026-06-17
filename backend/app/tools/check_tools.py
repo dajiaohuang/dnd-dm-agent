@@ -141,6 +141,48 @@ CHECK_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "undo_damage",
+            "description": "撤销最近一次对角色造成的伤害。用户说「撤销伤害」「上次攻击不算」「回退HP」时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "character_name": {"type": "string", "description": "要撤销伤害的角色名"},
+                },
+                "required": ["character_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "undo_healing",
+            "description": "撤销最近一次治疗。用户说「撤销治疗」时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "character_name": {"type": "string", "description": "角色名"},
+                },
+                "required": ["character_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recent_changes",
+            "description": "查询最近的 HP 变更历史。用户说「最近改了什么」「HP 变更记录」时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "character_name": {"type": "string", "description": "角色名（可选）"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -401,6 +443,158 @@ def handle_get_character_snapshot(
                snapshot=hot.to_json(), turn_consuming=False)
 
 
+def handle_undo_damage(
+    db: Session, campaign: Campaign,
+    character: Character | None = None,
+    character_name: str = "",
+    **_kw: Any,
+) -> dict:
+    """Undo the most recent apply_damage for this character."""
+    from app.db.models import DiceAuditLog
+    from sqlalchemy import select as _sel, desc as _desc
+
+    if not character and character_name:
+        character = db.scalar(
+            _sel(Character).where(
+                Character.campaign_id == campaign.id,
+                Character.character_name == character_name,
+            )
+        )
+    if not character:
+        return _err(f"未找到角色: {character_name}")
+
+    # Find most recent apply_damage audit log
+    log = db.scalar(
+        _sel(DiceAuditLog)
+        .where(DiceAuditLog.character_id == character.id, DiceAuditLog.tool_name == "apply_damage")
+        .order_by(_desc(DiceAuditLog.created_at))
+        .limit(1)
+    )
+    if not log:
+        return _err(f"{character.character_name} 最近没有伤害记录。")
+
+    # Read the damage amount from audit context or roll_detail
+    amount = int((log.roll_detail or {}).get("damage", log.roll_detail.get("amount", 0)) or 0)
+    if not amount:
+        amount = int(log.roll_result or 0)
+
+    data = character.data or {}
+    combat = data.get("combat", {})
+    before = int(combat.get("current_hp", 0))
+    maximum = int(combat.get("max_hp", before))
+    after = min(maximum, before + amount)
+    combat["current_hp"] = after
+    data["combat"] = combat
+    character.data = data
+    db.commit()
+
+    from app.tools.hot_character import checked_roll
+    # Write undo audit log (no dice roll, just record)
+    checked_roll(db, "undo", campaign.id, character.id, "undo_damage", "undo_damage")
+    return _ok(
+        f"↩️ {character.character_name} 已撤销 {amount} 点伤害：HP {before}→{after}",
+        character_id=character.id, before_hp=before, after_hp=after, undone_amount=amount,
+        turn_consuming=False,
+    )
+
+
+def handle_undo_healing(
+    db: Session, campaign: Campaign,
+    character: Character | None = None,
+    character_name: str = "",
+    **_kw: Any,
+) -> dict:
+    """Undo the most recent apply_healing for this character."""
+    from app.db.models import DiceAuditLog
+    from sqlalchemy import select as _sel, desc as _desc
+
+    if not character and character_name:
+        character = db.scalar(
+            _sel(Character).where(
+                Character.campaign_id == campaign.id,
+                Character.character_name == character_name,
+            )
+        )
+    if not character:
+        return _err(f"未找到角色: {character_name}")
+
+    log = db.scalar(
+        _sel(DiceAuditLog)
+        .where(DiceAuditLog.character_id == character.id, DiceAuditLog.tool_name == "apply_healing")
+        .order_by(_desc(DiceAuditLog.created_at))
+        .limit(1)
+    )
+    if not log:
+        return _err(f"{character.character_name} 最近没有治疗记录。")
+
+    amount = int((log.roll_detail or {}).get("healing", log.roll_detail.get("amount", 0)) or 0)
+    if not amount:
+        amount = int(log.roll_result or 0)
+
+    data = character.data or {}
+    combat = data.get("combat", {})
+    before = int(combat.get("current_hp", 0))
+    after = max(0, before - amount)
+    combat["current_hp"] = after
+    data["combat"] = combat
+    character.data = data
+    db.commit()
+
+    return _ok(
+        f"↩️ {character.character_name} 已撤销 {amount} 点治疗：HP {before}→{after}",
+        character_id=character.id, before_hp=before, after_hp=after, undone_amount=amount,
+        turn_consuming=False,
+    )
+
+
+def handle_recent_changes(
+    db: Session, campaign: Campaign,
+    character: Character | None = None,
+    character_name: str = "",
+    **_kw: Any,
+) -> dict:
+    """Show recent HP changes for a character."""
+    from app.db.models import DiceAuditLog
+    from sqlalchemy import select as _sel, desc as _desc
+
+    filter_kwargs = {"campaign_id": campaign.id}
+    if character:
+        filter_kwargs["character_id"] = character.id
+    elif character_name:
+        ch = db.scalar(
+            _sel(Character).where(
+                Character.campaign_id == campaign.id,
+                Character.character_name == character_name,
+            )
+        )
+        if ch:
+            filter_kwargs["character_id"] = ch.id
+
+    logs = db.scalars(
+        _sel(DiceAuditLog)
+        .where(
+            DiceAuditLog.campaign_id == filter_kwargs["campaign_id"],
+            DiceAuditLog.character_id == filter_kwargs.get("character_id", ""),
+            DiceAuditLog.tool_name.in_(["apply_damage", "apply_healing", "undo_damage", "undo_healing"]),
+        )
+        .order_by(_desc(DiceAuditLog.created_at))
+        .limit(10)
+    ).all()
+
+    if not logs:
+        return _ok("没有找到 HP 变更记录。", turn_consuming=False)
+
+    lines = ["=== 最近 HP 变更 ==="]
+    for log in logs:
+        detail = log.roll_detail or {}
+        tool = log.tool_name
+        amount = detail.get("damage", detail.get("healing", detail.get("undone_amount", log.roll_result)))
+        before = detail.get("before_hp", "?")
+        after = detail.get("after_hp", "?")
+        lines.append(f"  [{tool}] {before}→{after} ({amount:+d}) | {log.context[:30]}")
+    return _ok("\n".join(lines), turn_consuming=False)
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  REGISTRY
 # ═══════════════════════════════════════════════════════════════════
@@ -413,4 +607,7 @@ CHECK_HANDLERS: dict[str, Any] = {
     "apply_condition": handle_apply_condition,
     "remove_condition": handle_remove_condition,
     "get_character_snapshot": handle_get_character_snapshot,
+    "undo_damage": handle_undo_damage,
+    "undo_healing": handle_undo_healing,
+    "recent_changes": handle_recent_changes,
 }
