@@ -1148,25 +1148,19 @@ def handle_complete_character_sheet(
 def handle_generate_cards_from_settings(
     db: Session, campaign: Campaign, **_kw: Any,
 ) -> dict:
-    """Enqueue background subagent to create character cards for all NPC settings."""
-    from app.campaign_editor import list_settings
-    from app.db.models import TaskSession
-    from app.services import uid
-    from app.subagent_runner import enqueue_subagent_task
+    """Synchronously create character cards for all NPC/monster settings."""
+    from app.campaign_editor import list_settings, setting_to_npc_character
 
     settings = [s for s in list_settings(db, campaign.id) if s.category in {"npc", "monster"}]
     if not settings:
-        return _err("no npc/monster settings found")
-    task = TaskSession(
-        id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
-        platform="system", chat_id=None, owner_user_id=None, session_id=None,
-        status="queued", priority=2, draft_data={},
-        proposal_data={"agent_role": "bulk_character_from_setting"},
-        missing_fields=[], next_prompt=f"为 {len(settings)} 个 NPC 生成角色卡",
-    )
-    db.add(task); db.commit()
-    enqueue_subagent_task(task.id)
-    return _ok(f"后台开始为 {len(settings)} 个 NPC 生成角色卡。完成后会自动通知你。")
+        return _err("当前战役没有已发布的 NPC/怪物设定。请先创建。")
+    created = []
+    for s in settings:
+        ch = setting_to_npc_character(db, s)
+        if ch:
+            created.append(ch.character_name)
+    return _ok(f"已为 {len(created)} 个 NPC 创建角色卡: {', '.join(created[:10])}。",
+               created_count=len(created))
 
 
 def handle_check_background_tasks(
@@ -1213,7 +1207,7 @@ def handle_generate_npc_set(
             platform="system", chat_id=None, owner_user_id=None, session_id=None,
             status="queued", priority=2, draft_data={},
             proposal_data={
-                "agent_role": "npc_set_generator",
+                "agent_role": "npc_batch_worker",
                 "proposal": {
                     "batch_start": start, "batch_size": batch_size,
                     "total_count": count, "theme": theme or campaign.name,

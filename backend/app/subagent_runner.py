@@ -41,9 +41,7 @@ def run_subagent_task(task_id: str) -> None:
                 result = review_character_sheet(db, campaign, proposal_data)
             elif role == "character_completer":
                 result = complete_character_sheet(db, campaign, proposal_data)
-            elif role == "bulk_character_from_setting":
-                result = bulk_character_from_settings(db, campaign, proposal_data)
-            elif role == "npc_set_generator":
+            elif role == "npc_batch_worker":
                 result = generate_npc_batch(db, campaign, proposal_data)
             elif role == "campaign_compressor":
                 result = compress_campaign_events(db, campaign, proposal_data)
@@ -222,31 +220,6 @@ def complete_character_sheet(db, campaign: Campaign, proposal_data: dict[str, An
             "inventory_added": len(suggestion.get("inventory") or []),
             "skills_added": len(suggestion.get("skills") or []),
             "notes": suggestion.get("notes", "")}
-
-
-def bulk_character_from_settings(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
-    """Background subagent: create Character cards for all NPC settings."""
-    from app.campaign_editor import list_settings, setting_to_npc_character
-    from app.services import serialize
-
-    settings = [s for s in list_settings(db, campaign.id) if s.category in {"npc", "monster"}]
-    created = []
-    total = len(settings)
-    for i, setting in enumerate(settings):
-        char = setting_to_npc_character(db, setting)
-        created.append({"name": char.character_name, "id": char.id})
-        proposal_data["progress"] = f"{i+1}/{total}"
-        # Write progress so user can check mid-generation
-        db.commit()
-    return {
-        "kind": "bulk_character_cards",
-        "created": len(created),
-        "total": total,
-        "characters": created,
-        "progress": f"{len(created)}/{total}",
-    }
-
-
 def generate_npc_batch(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
     """Background subagent: generate a batch of NPC settings via LLM."""
     proposal = proposal_data.get("proposal") or {}
@@ -291,12 +264,21 @@ def generate_npc_batch(db, campaign: Campaign, proposal_data: dict[str, Any]) ->
         })
         created.append(draft.name)
 
-    from app.campaign_editor import publish_drafts
+    from app.campaign_editor import publish_drafts, setting_to_npc_character, list_settings
     published = publish_drafts(db, campaign.id)
+    # Also create character cards from settings if requested
+    card_names = []
+    if proposal.get("create_cards"):
+        npc_settings = [s for s in list_settings(db, campaign.id) if s.category == "npc"]
+        for s in npc_settings:
+            ch = setting_to_npc_character(db, s)
+            if ch:
+                card_names.append(ch.character_name)
     return {
         "kind": "npc_batch_generated",
         "batch": f"{batch_start+1}-{min(batch_start+batch_size, total_count)}",
-        "created": len(published),
+        "settings_published": len(published),
+        "character_cards": len(card_names),
         "names": created,
     }
 
