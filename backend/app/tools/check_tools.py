@@ -318,6 +318,10 @@ def handle_apply_damage(
     data["combat"] = combat
     character.data = data
     db.commit()
+    from app.tools.hot_character import record_character_change
+    record_character_change(db, character, "apply_damage",
+                            {"current_hp": before}, {"current_hp": after},
+                            f"{amount} {damage_type or 'damage'}")
 
     narration = f"💥 {character.character_name} 受到 {amount} 点{damage_type or '伤害'}：HP {before}→{after}"
     if after <= 0:
@@ -353,6 +357,10 @@ def handle_apply_healing(
     data["combat"] = combat
     character.data = data
     db.commit()
+    from app.tools.hot_character import record_character_change
+    record_character_change(db, character, "apply_healing",
+                            {"current_hp": before}, {"current_hp": after},
+                            f"healed {amount}")
 
     narration = f"💚 {character.character_name} 恢复 {amount} 点生命：HP {before}→{after}"
     return _ok(narration, character_id=character.id, before_hp=before,
@@ -449,8 +457,8 @@ def handle_undo_damage(
     character_name: str = "",
     **_kw: Any,
 ) -> dict:
-    """Undo the most recent apply_damage for this character."""
-    from app.db.models import DiceAuditLog
+    """Undo the most recent apply_damage for this character using CharacterChange records."""
+    from app.db.models import CharacterChange
     from sqlalchemy import select as _sel, desc as _desc
 
     if not character and character_name:
@@ -463,37 +471,38 @@ def handle_undo_damage(
     if not character:
         return _err(f"未找到角色: {character_name}")
 
-    # Find most recent apply_damage audit log
-    log = db.scalar(
-        _sel(DiceAuditLog)
-        .where(DiceAuditLog.character_id == character.id, DiceAuditLog.tool_name == "apply_damage")
-        .order_by(_desc(DiceAuditLog.created_at))
+    # Find most recent apply_damage from CharacterChange (hot value history)
+    change = db.scalar(
+        _sel(CharacterChange)
+        .where(CharacterChange.character_id == character.id,
+               CharacterChange.change_type == "apply_damage")
+        .order_by(_desc(CharacterChange.created_at))
         .limit(1)
     )
-    if not log:
+    if not change:
         return _err(f"{character.character_name} 最近没有伤害记录。")
 
-    # Read the damage amount from audit context or roll_detail
-    amount = int((log.roll_detail or {}).get("damage", log.roll_detail.get("amount", 0)) or 0)
-    if not amount:
-        amount = int(log.roll_result or 0)
+    before_hp = int((change.before_data or {}).get("current_hp", 0))
+    after_hp = int((change.after_data or {}).get("current_hp", 0))
+    amount = before_hp - after_hp
 
     data = character.data or {}
     combat = data.get("combat", {})
-    before = int(combat.get("current_hp", 0))
-    maximum = int(combat.get("max_hp", before))
-    after = min(maximum, before + amount)
-    combat["current_hp"] = after
+    current = int(combat.get("current_hp", 0))
+    maximum = int(combat.get("max_hp", current))
+    restored = min(maximum, current + max(0, amount))
+    combat["current_hp"] = restored
     data["combat"] = combat
     character.data = data
+    from app.tools.hot_character import record_character_change
+    record_character_change(db, character, "undo_damage",
+                            {"current_hp": current}, {"current_hp": restored},
+                            f"undid {amount} damage")
     db.commit()
 
-    from app.tools.hot_character import checked_roll
-    # Write undo audit log (no dice roll, just record)
-    checked_roll(db, "undo", campaign.id, character.id, "undo_damage", "undo_damage")
     return _ok(
-        f"↩️ {character.character_name} 已撤销 {amount} 点伤害：HP {before}→{after}",
-        character_id=character.id, before_hp=before, after_hp=after, undone_amount=amount,
+        f"↩️ {character.character_name} 已撤销 {amount} 点伤害：HP {current}→{restored}",
+        character_id=character.id, before_hp=current, after_hp=restored, undone_amount=amount,
         turn_consuming=False,
     )
 
@@ -504,8 +513,8 @@ def handle_undo_healing(
     character_name: str = "",
     **_kw: Any,
 ) -> dict:
-    """Undo the most recent apply_healing for this character."""
-    from app.db.models import DiceAuditLog
+    """Undo the most recent apply_healing using CharacterChange records."""
+    from app.db.models import CharacterChange
     from sqlalchemy import select as _sel, desc as _desc
 
     if not character and character_name:
@@ -518,31 +527,36 @@ def handle_undo_healing(
     if not character:
         return _err(f"未找到角色: {character_name}")
 
-    log = db.scalar(
-        _sel(DiceAuditLog)
-        .where(DiceAuditLog.character_id == character.id, DiceAuditLog.tool_name == "apply_healing")
-        .order_by(_desc(DiceAuditLog.created_at))
+    change = db.scalar(
+        _sel(CharacterChange)
+        .where(CharacterChange.character_id == character.id,
+               CharacterChange.change_type == "apply_healing")
+        .order_by(_desc(CharacterChange.created_at))
         .limit(1)
     )
-    if not log:
+    if not change:
         return _err(f"{character.character_name} 最近没有治疗记录。")
 
-    amount = int((log.roll_detail or {}).get("healing", log.roll_detail.get("amount", 0)) or 0)
-    if not amount:
-        amount = int(log.roll_result or 0)
+    before_hp = int((change.before_data or {}).get("current_hp", 0))
+    after_hp = int((change.after_data or {}).get("current_hp", 0))
+    amount = after_hp - before_hp
 
     data = character.data or {}
     combat = data.get("combat", {})
-    before = int(combat.get("current_hp", 0))
-    after = max(0, before - amount)
-    combat["current_hp"] = after
+    current = int(combat.get("current_hp", 0))
+    restored = max(0, current - max(0, amount))
+    combat["current_hp"] = restored
     data["combat"] = combat
     character.data = data
+    from app.tools.hot_character import record_character_change
+    record_character_change(db, character, "undo_healing",
+                            {"current_hp": current}, {"current_hp": restored},
+                            f"undid {amount} healing")
     db.commit()
 
     return _ok(
-        f"↩️ {character.character_name} 已撤销 {amount} 点治疗：HP {before}→{after}",
-        character_id=character.id, before_hp=before, after_hp=after, undone_amount=amount,
+        f"↩️ {character.character_name} 已撤销 {amount} 点治疗：HP {current}→{restored}",
+        character_id=character.id, before_hp=current, after_hp=restored, undone_amount=amount,
         turn_consuming=False,
     )
 

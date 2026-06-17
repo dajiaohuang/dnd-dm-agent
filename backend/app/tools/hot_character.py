@@ -387,6 +387,31 @@ def hot_character_for_llm(db: Session, character_id: str | None,
     return hot.to_compact_json() if hot else None
 
 
+def record_character_change(
+    db: Session,
+    character: Character,
+    change_type: str,
+    before_data: dict | None = None,
+    after_data: dict | None = None,
+    reason: str = "",
+    rule_refs: list | None = None,
+) -> None:
+    """Record a character attribute change for audit trail."""
+    from app.db.models import CharacterChange
+    from app.services import uid
+    db.add(CharacterChange(
+        id=uid("chg"),
+        campaign_id=character.campaign_id,
+        character_id=character.id,
+        change_type=change_type,
+        before_data=before_data or {},
+        after_data=after_data or {},
+        reason=reason,
+        rule_refs=rule_refs or [],
+    ))
+    db.commit()
+
+
 # ── Checked Roll ─────────────────────────────────────────────────
 
 def checked_roll(

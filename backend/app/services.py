@@ -390,30 +390,46 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
 
     if mode == "dice":
         _sys = (
-            "你是桌面跑团的工具型骰娘。自然、直接地回答规则、角色卡、技能、法术、物品、"
-            "检定、数值计算和明确的状态记录问题。"
-            "只能依据提供的战役上下文、机械数据和记忆回答。"
-            "只输出事实、数据、规则引用、计算结果、状态变更或必要的澄清问题。"
-            "始终禁止 NPC 台词和剧情续写。禁止推进或编造剧情，禁止替真实 DM 决定结果。"
-            "禁止给玩家战术建议。"
-            "信息不足时只列出缺少的字段。"
-            "当行动可选择多种技能时（如攀爬可用运动或体操），调用 ask_clarification 让玩家选择。"
-            "需要检定时调用 ability_check 或 saving_throw 工具，禁止编造投骰结果。"
-            "当用户说记错了、撤销、回退、上次不算时，调用 undo_damage 或 undo_healing 工具。"
-            "当用户问最近变更记录时，调用 recent_changes 工具。"
-            "\n━━━ 非系统管理战斗的回合意识 ━━━\n"
-            "你不在系统回合制模式下，真人在管理战斗。但你可以根据对话历史辅助判断回合:"
-            "\n1. 从最近的 campaign events 中提取 @你的战斗行动，推断大致谁刚行动过"
-            "\n2. 如果连续多人 @你行动但明显跳过了某个人，可以提醒："
-            "   「⚠️ 我注意到 A 和 C 都行动了，但 B 还没动。B 是不是被跳过了？」"
-            "\n3. 如果战斗似乎开始了但没人 @你提过先攻，可以问："
-            "   「🎯 看起来战斗开始了。需要我帮忙投先攻吗？回复 /进入战斗 我来管理系统。"
-            "   或者告诉我参战角色，我可以用 /start_combat 帮你们开始。」"
-            "\n4. 如果你不确定当前轮到谁，可以问："
-            "   「❓ 我刚才看到了 A 的攻击和 B 的施法。现在是 C 的回合吗？还是下一轮了？」"
-            "\n5. 以上全都是建议性的，不要强制管理。真人的决定优先。"
-            "\n6. 只有真人明确 @你说「进入战斗」「开始战斗」并确认后，才进入系统回合制模式。"
-            "\n   非系统回合制时不追踪先攻顺序、不管理轮次、不自动推进回合。"
+            "你是桌面跑团的工具型骰娘。你不在系统回合制模式下——真人 DM 在管理战斗。\n"
+            "你的核心职责：读取角色热数据 → 投骰 → 结算 → 写回数据库。\n"
+            "\n"
+            "━━━ 主流流程：非管理战斗 ━━━\n"
+            "通常从有人 @你「帮扔先攻」开始，然后玩家轮流 @你进行行动：\n"
+            "1. @骰娘 帮Aric、Goblin、Mira扔先攻\n"
+            "   → 手动投每个人的先攻: hot_character → initiative + checked_roll('1d20')\n"
+            "   → 输出结果列表，但不写入战役配置（不进入系统回合制）\n"
+            "2. 玩家A @骰娘 我用长剑攻击地精\n"
+            "   → LLM理解 → combat_attack/ability_check → checked_roll → 返回结果\n"
+            "   → 如果造成伤害 → apply_damage 写入 character.data.combat\n"
+            "3. 玩家B @骰娘 我喝治疗药水\n"
+            "   → apply_healing 写入 HP\n"
+            "4. 玩家C @骰娘 等等上次伤害记错了，回退\n"
+            "   → undo_damage → 从 character_change_log 反推 → 恢复HP\n"
+            "\n"
+            "━━━ 非管理战斗的回合感知 ━━━\n"
+            "从最近的 campaign events / memories 中提取 @你的战斗行动，推断回合状态：\n"
+            "- 看到「Aric攻击」「Mira施法」→ 提醒: 「Aric和Mira都行动了。Goblin还没动。」\n"
+            "- 看到单人多次行动 → 问: 「Aric动了两轮了，是新一轮了吗？」\n"
+            "- 不确定回合顺序 → 问: 「刚才Aric行动了，现在是轮到谁？」\n"
+            "- 看起来跳过了某人 → 提醒: 「⚠️ B还没行动就被跳过了」\n"
+            "- 以上全都是建议性的，不强制。真人的决定优先。\n"
+            "\n"
+            "━━━ 进入系统回合制 ━━━\n"
+            "只有 DM 明确 @你说「进入战斗」「开始战斗」「管理系统战斗」时，才回复：\n"
+            "「准备进入系统回合制战斗。需要确认：\n"
+            "  1. 哪些角色参战？（请列出名字）\n"
+            "  2. 有没有角色先攻有优势或劣势？\n"
+            "  确认后我投全体先攻并开始管理回合。」\n"
+            "不要在自己猜参战者或自己决定优势劣势。必须等 DM 回复确认。\n"
+            "在 DM 确认之前，继续以非管理模式处理战斗行动。\n"
+            "\n"
+            "━━━ 通用规则 ━━━\n"
+            "只输出事实、数据、规则引用、计算结果、状态变更。\n"
+            "禁止 NPC 台词、剧情续写、战术建议。禁止替真人 DM 做决定。\n"
+            "当行动可选多技能时调用 ask_clarification。\n"
+            "需要检定时调用 ability_check/saving_throw，禁止编造投骰结果。\n"
+            "用户说记错了/撤销/回退 → undo_damage 或 undo_healing。\n"
+            "用户问最近变更 → recent_changes。"
         )
     else:
         combat_instr = ""
@@ -451,62 +467,16 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
         else "你的行动让局势继续向前推进。四周的目光落在你身上，等待你作出下一步选择。"
     )
 
-    # Try tool-enabled LLM call; fall back to plain chat_completion if no tools triggered
-    _tool_used = False
-    try:
-        from app.tools.command_tools import TOOL_HANDLERS, tools_for_scope
-        _tools = tools_for_scope(campaign, is_dm=False)
-        _resp = chat_completion(_msgs, temperature=temperature, tools=_tools)
-    except Exception:
-        _resp = None
-
-    if _resp is not None and not isinstance(_resp, str) and _resp.tool_calls:
-        _tool_used = True
-        import json as _json
-        for tc in _resp.tool_calls:
-            handler = TOOL_HANDLERS.get(tc.function.name)
-            try:
-                _args = _json.loads(tc.function.arguments or "{}")
-            except _json.JSONDecodeError:
-                _args = {}
-            _args.setdefault("db", db)
-            _args.setdefault("campaign", campaign)
-            _args.setdefault("user_id", "")
-            if handler:
-                try:
-                    _tr = handler(**{k: v for k, v in _args.items()
-                        if k in {"db", "campaign", "character_name", "class_name",
-                                  "level", "ancestry", "background", "abilities",
-                                  "category", "name", "description", "query",
-                                  "user_id", "player_name"}})
-                except Exception as exc:
-                    _tr = {"ok": False, "narration": f"工具执行失败: {exc}"}
-            else:
-                _tr = {"ok": False, "narration": f"未知工具: {tc.function.name}"}
-            _msgs.append({
-                "role": "assistant", "content": _resp.content,
-                "tool_calls": [{"id": tc.id, "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments}}],
-            })
-            _msgs.append({"role": "tool", "tool_call_id": tc.id,
-                "content": _json.dumps(_tr, ensure_ascii=False, default=str)})
-        try:
-            _resp2 = chat_completion(_msgs, temperature=0.7, tools=_tools)
-            if _resp2 is not None and not isinstance(_resp2, str):
-                narration = _resp2.content
-            else:
-                narration = _resp2 if isinstance(_resp2, str) else None
-        except Exception:
-            narration = None
-        narration = narration or _fallback_text
-
-    if not _tool_used:
-        if isinstance(_resp, str):
-            narration = _resp or _fallback_text
-        elif _resp is not None and _resp.content:
-            narration = _resp.content
-        else:
-            narration = chat_completion(_msgs, temperature=temperature) or _fallback_text
+    # Use unified tool loop (same as turn-based combat)
+    from app.llm_loop import execute_llm_with_tools
+    _tool_result = execute_llm_with_tools(
+        db, campaign, session_id, character_id, None, False, "",
+        None, messages=_msgs, skip_user_message=True,
+    )
+    if _tool_result.get("kind") == "llm_unavailable":
+        narration = chat_completion(_msgs, temperature=temperature) or _fallback_text
+    else:
+        narration = _tool_result.get("narration") or _fallback_text
     # ── Dice mode: strip roleplay/advice output ──
     if mode == "dice" and narration:
         from app.dice_assistant import strict_tool_output

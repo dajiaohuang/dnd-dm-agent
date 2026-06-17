@@ -224,14 +224,18 @@ DEFAULT_ACTIONS = {
 
 
 def get_actions_remaining(campaign: Campaign) -> dict:
-    """Return current turn's action quota."""
+    """Return current turn's action quota. Only valid in turn_based mode."""
+    if runtime_mode(campaign) != "turn_based":
+        return dict(DEFAULT_ACTIONS)  # Always return fresh defaults in free-form
     ts = (campaign.config or {}).get("turn_state") or {}
     current = ts.get("current_turn") or {}
     return {**DEFAULT_ACTIONS, **current.get("actions_remaining", {})}
 
 
 def set_actions_remaining(db: Session, campaign: Campaign, actions: dict) -> None:
-    """Update current turn's action quota."""
+    """Update current turn's action quota. No-op in free-form mode."""
+    if runtime_mode(campaign) != "turn_based":
+        return  # Don't pollute config in free-form
     config = copy.deepcopy(campaign.config or {})
     ts = config.setdefault("turn_state", {})
     current = ts.setdefault("current_turn", {})
@@ -248,10 +252,13 @@ def init_turn_actions(db: Session, campaign: Campaign, character_id: str = "") -
 
 
 def consume_action(db: Session, campaign: Campaign, action_type: str, amount: int = 1) -> dict | None:
-    """Consume one unit of an action type. Returns remaining quota or None if not enough."""
+    """Consume one unit of an action type. Returns remaining quota or None if not enough.
+    In free-form mode, always returns fresh defaults (no real tracking needed)."""
+    if runtime_mode(campaign) != "turn_based":
+        return dict(DEFAULT_ACTIONS)  # Free-form: unlimited actions, human DM manages turns
     actions = get_actions_remaining(campaign)
     if actions.get(action_type, 0) < amount:
-        return None  # Not enough
+        return None
     actions[action_type] -= amount
     set_actions_remaining(db, campaign, actions)
     return actions
