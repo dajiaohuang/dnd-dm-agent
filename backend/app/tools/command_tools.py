@@ -1091,15 +1091,22 @@ def tools_for_scope(campaign: Campaign, is_dm: bool) -> list[dict[str, Any]]:
         "create_npc_cards_from_settings",
     }
 
+    # ── Slash-only: not surfaced to LLM ──
+    slash_only = {"help", "enter_campaign_edit", "exit_campaign_edit",
+                  "enter_dice_assistant", "exit_dice_assistant", "ask_clarification"}
+
     always_available = {
-        "status", "help", "show_bindings", "bind_character",
+        "status", "show_bindings", "bind_character",
         "export_character_sheet", "create_character_quick",
         "save_campaign_setting", "spell_search", "memory_search",
         "enable_combat_roleplay", "disable_combat_roleplay",
-    }
-
-    dice_only = {
-        "enter_dice_assistant", "exit_dice_assistant",
+        # Draft tools (all modes)
+        "create_character_draft", "update_character_draft",
+        "show_character_draft", "commit_character_draft", "cancel_character_draft",
+        "create_setting_draft", "show_setting_drafts",
+        "publish_setting_drafts", "discard_setting_drafts",
+        "list_setting_drafts", "validate_settings",
+        "create_npc_quick",
     }
 
     allowed: set[str] = set(always_available)
@@ -1117,8 +1124,9 @@ def tools_for_scope(campaign: Campaign, is_dm: bool) -> list[dict[str, Any]]:
     elif mode == "turn_based":
         allowed |= {"next_turn", "start_combat", "end_combat"}
 
-    result = [t for t in COMMAND_TOOLS if t["function"]["name"] in allowed]
+    result = [t for t in COMMAND_TOOLS if t["function"]["name"] in allowed and t["function"]["name"] not in slash_only]
     # Always include check tools and combat tools (they have their own access control)
     result.extend(CHECK_TOOLS)
-    result.extend(COMBAT_TOOLS)
+    # Combat tools: filter out ask_clarification (slash-only)
+    result.extend([t for t in COMBAT_TOOLS if t["function"]["name"] not in slash_only])
     return result
