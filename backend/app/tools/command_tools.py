@@ -1191,6 +1191,43 @@ def handle_check_background_tasks(
 
 
 
+
+def handle_generate_npc_set(
+    db: Session, campaign: Campaign,
+    count: int = 0, theme: str = "", batch_size: int = 6, **_kw: Any,
+) -> dict:
+    """Split N NPCs into batches and enqueue background subagent tasks."""
+    if count < 1:
+        return _err("需要指定 NPC 数量。例如: 创建30个NPC")
+    batch_size = max(3, min(batch_size, 8))  # clamp 3-8
+    from app.db.models import TaskSession
+    from app.services import uid
+    from app.subagent_runner import enqueue_subagent_task
+
+    batches = (count + batch_size - 1) // batch_size
+    task_ids = []
+    for b in range(batches):
+        start = b * batch_size
+        task = TaskSession(
+            id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
+            platform="system", chat_id=None, owner_user_id=None, session_id=None,
+            status="queued", priority=2, draft_data={},
+            proposal_data={
+                "agent_role": "npc_set_generator",
+                "proposal": {
+                    "batch_start": start, "batch_size": batch_size,
+                    "total_count": count, "theme": theme or campaign.name,
+                },
+            },
+            missing_fields=[], next_prompt=f"NPC {start+1}-{min(start+batch_size, count)}",
+        )
+        db.add(task); task_ids.append(task.id)
+    db.commit()
+    for tid in task_ids:
+        enqueue_subagent_task(tid)
+    return _ok(f"后台开始生成 {count} 个 NPC（{batches} 批，每批 {batch_size} 个）。完成后自动通知。")
+
+
 def handle_switch_campaign(
     db: Session, campaign: Campaign,
     campaign_name: str = "", **_kw: Any,
@@ -1279,6 +1316,7 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "read_attachment": handle_read_attachment,
     "complete_character_sheet": handle_complete_character_sheet,
     "generate_cards_from_settings": handle_generate_cards_from_settings,
+    "generate_npc_set": handle_generate_npc_set,
     "check_background_tasks": handle_check_background_tasks,
     # Delegated to execute_command
     **_DELEGATED_HANDLERS,
@@ -1318,6 +1356,7 @@ def tools_for_scope(campaign: Campaign, is_dm: bool, message: str = "") -> list[
         "publish_setting_drafts", "discard_setting_drafts",
         "list_setting_drafts", "validate_settings",
         "create_npc_quick",
+        "generate_npc_set",
     }
 
     # ── Lobby mode: limited tool set ──

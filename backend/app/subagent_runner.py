@@ -43,6 +43,8 @@ def run_subagent_task(task_id: str) -> None:
                 result = complete_character_sheet(db, campaign, proposal_data)
             elif role == "bulk_character_from_setting":
                 result = bulk_character_from_settings(db, campaign, proposal_data)
+            elif role == "npc_set_generator":
+                result = generate_npc_batch(db, campaign, proposal_data)
             elif role == "campaign_compressor":
                 result = compress_campaign_events(db, campaign, proposal_data)
             else:
@@ -242,6 +244,60 @@ def bulk_character_from_settings(db, campaign: Campaign, proposal_data: dict[str
         "total": total,
         "characters": created,
         "progress": f"{len(created)}/{total}",
+    }
+
+
+def generate_npc_batch(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
+    """Background subagent: generate a batch of NPC settings via LLM."""
+    proposal = proposal_data.get("proposal") or {}
+    batch_start = int(proposal.get("batch_start", 0))
+    batch_size = int(proposal.get("batch_size", 6))
+    theme = str(proposal.get("theme") or campaign.description or "fantasy")
+    total_count = int(proposal.get("total_count", batch_size))
+
+    import json as _j
+    llm_result = chat_completion([{
+        "role": "system", "content": (
+            f"You are a D&D 5E NPC designer. Generate {batch_size} unique NPCs "
+            f"for a {theme} setting. Each NPC needs: name, occupation, race, "
+            f"age, alignment, personality (1 sentence), appearance (1 sentence), "
+            f"secret or motivation (1 sentence). "
+            f"Return ONLY a JSON array of NPC objects with keys: "
+            f"name, occupation, ancestry, age, alignment, personality, appearance, secret."
+        ),
+    }, {"role": "user", "content": f"Generate NPCs {batch_start+1}-{batch_start+batch_size} of {total_count}"}],
+        temperature=0.8)
+
+    try:
+        npcs = _j.loads(llm_result or "[]")
+    except Exception:
+        npcs = [{"name": f"NPC {batch_start+i}", "occupation": "villager", "ancestry": "human",
+                 "age": "adult", "alignment": "neutral", "personality": "ordinary",
+                 "appearance": "ordinary", "secret": "none"} for i in range(1, batch_size+1)]
+
+    from app.campaign_editor import create_draft
+    from app.services import uid
+
+    created = []
+    for npc in npcs:
+        draft = create_draft(db, campaign.id, "create", proposal={
+            "category": "npc", "name": npc.get("name", "?"),
+            "description": (
+                f"职业: {npc.get('occupation','?')} | 种族: {npc.get('ancestry','?')} | "
+                f"阵营: {npc.get('alignment','?')}\n"
+                f"性格: {npc.get('personality','?')}\n外貌: {npc.get('appearance','?')}\n"
+                f"秘密: {npc.get('secret','?')}"
+            ),
+        })
+        created.append(draft.name)
+
+    from app.campaign_editor import publish_drafts
+    published = publish_drafts(db, campaign.id)
+    return {
+        "kind": "npc_batch_generated",
+        "batch": f"{batch_start+1}-{min(batch_start+batch_size, total_count)}",
+        "created": len(published),
+        "names": created,
     }
 
 
