@@ -1531,7 +1531,11 @@ def tools_for_scope(campaign: Campaign, is_dm: bool, message: str = "") -> list[
     if is_dm:
         allowed |= dm_only_commands
     if style == "lobby":
-        allowed = lobby_tools  # lobby always has the same set, DM or not
+        if campaign is None:
+            # No campaign at all → only creation and search tools
+            allowed = {"create_campaign_from_prompt", "spell_search"}
+        else:
+            allowed = lobby_tools
     if style == "dice_assistant":
         allowed -= {"enter_campaign_edit", "exit_campaign_edit",
                      "publish_settings", "discard_settings",
