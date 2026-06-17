@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from app.db.models import Campaign
 from app.llm import chat_completion
 from app.tools.command_tools import TOOL_HANDLERS, tools_for_scope
-from app.tools.combat_tools import COMBAT_HANDLERS
 
 _log = logging.getLogger(__name__)
 
@@ -104,7 +103,7 @@ def execute_llm_with_tools(
 
             for tc in resp.tool_calls:
                 tool_name = tc.function.name
-                handler = TOOL_HANDLERS.get(tool_name) or COMBAT_HANDLERS.get(tool_name)
+                handler = TOOL_HANDLERS.get(tool_name)
                 try:
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
@@ -128,20 +127,19 @@ def execute_llm_with_tools(
 
                 if handler:
                     try:
-                        result = handler(**{
-                            k: v for k, v in args.items()
-                            if k in {"db", "campaign", "session_id", "actor_id",
-                                      "is_dm", "user_id", "player_name",
-                                      "message_context", "character", "character_name",
-                                      "class_name", "level", "ancestry",
-                                      "background", "abilities", "category",
-                                      "name", "description", "query",
-                                      # Combat tool args
-                                      "target", "weapon", "attack_index",
-                                      "spell_name", "spell_level", "targets",
-                                      "save_type", "use_bonus_action", "use_reaction",
-                                      "ability", "reason", "question", "options"}
-                        })
+                        _allowed = {"db", "campaign", "session_id", "actor_id",
+                                    "is_dm", "user_id", "player_name",
+                                    "message_context", "character", "character_name",
+                                    "class_name", "level", "ancestry",
+                                    "background", "abilities", "category",
+                                    "name", "description", "query",
+                                    "target", "weapon", "attack_index",
+                                    "spell_name", "spell_level", "targets",
+                                    "save_type", "use_bonus_action", "use_reaction",
+                                    "ability", "reason", "question", "options",
+                                    "dc", "advantage", "disadvantage",
+                                    "amount", "damage_type", "condition"}
+                        result = handler(**{k: v for k, v in args.items() if k in _allowed})
                     except Exception as exc:
                         _log.exception("Tool %s failed", tool_name)
                         result = {"ok": False, "narration": f"工具执行失败: {exc}"}

@@ -385,3 +385,37 @@ def hot_character_for_llm(db: Session, character_id: str | None,
         return None
     hot = get_hot_character(db, character_id, combat=combat)
     return hot.to_compact_json() if hot else None
+
+
+# ── Checked Roll ─────────────────────────────────────────────────
+
+def checked_roll(
+    db: Session,
+    formula: str,
+    campaign_id: str,
+    character_id: str | None = None,
+    context: str = "",
+    tool_name: str = "",
+) -> dict:
+    """Every dice roll MUST go through this function.
+
+    Uses ``random.randint()`` for true randomness.
+    Writes a ``DiceAuditLog`` row for full traceability.
+    """
+    from app.db.models import DiceAuditLog
+    from app.services import uid
+    from app.tools.dice import roll_dice
+
+    result = roll_dice(formula)
+    db.add(DiceAuditLog(
+        id=uid("roll"),
+        campaign_id=campaign_id,
+        character_id=character_id,
+        roll_formula=formula,
+        roll_result=result["total"],
+        roll_detail=result,
+        context=context,
+        tool_name=tool_name,
+    ))
+    db.commit()
+    return result

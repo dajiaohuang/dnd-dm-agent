@@ -22,6 +22,8 @@ from app.character_build_flow import (
 )
 from app.qq_bindings import bind_qq, find_binding, find_bindings
 from app.campaign_editor import create_draft, publish_drafts, discard_drafts
+from app.tools.check_tools import CHECK_TOOLS, CHECK_HANDLERS
+from app.tools.combat_tools import COMBAT_TOOLS, COMBAT_HANDLERS
 # Use CampaignSettingDraft query directly for listing drafts
 
 # ── Handler signature ─────────────────────────────────────────────
@@ -1014,6 +1016,22 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "show_setting_drafts": handle_show_setting_drafts,
     "publish_setting_drafts": handle_publish_setting_drafts,
     "discard_setting_drafts": handle_discard_setting_drafts,
+    # Check & dice tools (from check_tools.py)
+    "ability_check": CHECK_HANDLERS["ability_check"],
+    "saving_throw": CHECK_HANDLERS["saving_throw"],
+    "apply_damage": CHECK_HANDLERS["apply_damage"],
+    "apply_healing": CHECK_HANDLERS["apply_healing"],
+    "apply_condition": CHECK_HANDLERS["apply_condition"],
+    "remove_condition": CHECK_HANDLERS["remove_condition"],
+    "get_character_snapshot": CHECK_HANDLERS["get_character_snapshot"],
+    # Combat tools (from combat_tools.py)
+    "combat_attack": COMBAT_HANDLERS["combat_attack"],
+    "combat_cast_spell": COMBAT_HANDLERS["combat_cast_spell"],
+    "combat_ability_check": COMBAT_HANDLERS["combat_ability_check"],
+    "combat_dash": COMBAT_HANDLERS["combat_dash"],
+    "combat_disengage": COMBAT_HANDLERS["combat_disengage"],
+    "combat_dodge": COMBAT_HANDLERS["combat_dodge"],
+    "ask_clarification": COMBAT_HANDLERS["ask_clarification"],
 }
 
 
@@ -1059,4 +1077,8 @@ def tools_for_scope(campaign: Campaign, is_dm: bool) -> list[dict[str, Any]]:
     elif mode == "turn_based":
         allowed |= {"next_turn", "start_combat", "end_combat"}
 
-    return [t for t in COMMAND_TOOLS if t["function"]["name"] in allowed]
+    result = [t for t in COMMAND_TOOLS if t["function"]["name"] in allowed]
+    # Always include check tools and combat tools (they have their own access control)
+    result.extend(CHECK_TOOLS)
+    result.extend(COMBAT_TOOLS)
+    return result
