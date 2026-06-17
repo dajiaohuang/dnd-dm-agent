@@ -182,9 +182,19 @@ def is_supported_message(payload: dict[str, Any]) -> bool:
     return payload.get("post_type") == "message" and payload.get("message_type") in {"private", "group"}
 
 
+ALLOWED_GROUP_IDS = {"903107519"}
+
+
 def is_allowed(payload: dict[str, Any]) -> bool:
     allowed = allowed_user_ids()
-    return not allowed or str(payload.get("user_id", "")).strip() in allowed
+    user_ok = not allowed or str(payload.get("user_id", "")).strip() in allowed
+    if not user_ok:
+        return False
+    if payload.get("message_type") == "group":
+        group_id = str(payload.get("group_id", "")).strip()
+        if group_id not in ALLOWED_GROUP_IDS:
+            return False
+    return True
 
 
 def callback_token_valid(authorization: str | None) -> bool:
