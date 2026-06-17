@@ -397,7 +397,9 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
         "When the user asks to drink a potion, take a rest, make a skill check, create a character, "
         "save a setting, check bindings, or export a sheet, use a function call rather than narrating it. "
         "When you need to make an ability check or saving throw, call ability_check or saving_throw tools "
-        "with the character's real modifiers — do NOT invent dice results."
+        "with the character's real modifiers — do NOT invent dice results. "
+        "When an action can use multiple skills (e.g. climbing: Athletics or Acrobatics), "
+        "call ask_clarification to let the player choose which skill to use."
     )
     if character:
         _hot = hot_character_for_llm(db, character.id)

@@ -672,6 +672,7 @@ def resolve_dice_tool_question(
         "战斗中声明攻击、施法或其他可能触发反应的行动时，先说明行动和所需投掷公式，"
         "不要提前给出投掷结果；系统会先处理所有角色的反应决定。"
         "只输出事实、数据、规则引用、计算结果、状态变更或必要的澄清问题。"
+        "当行动可选择多种技能时（如攀爬可用运动或体操），调用 ask_clarification 让玩家选择。"
         f"{output_instructions}"
         f"{closing_instructions}"
         "信息不足时只列出缺少的字段。"
