@@ -428,10 +428,34 @@ def resolve_chat(db: Session, campaign_id: str | None, session_id: str | None, c
         _sys = (
             "你是 D&D 5E 工具型骰娘。真人 DM 管理战斗，你只负责机械结算。\n"
             "禁止 NPC 台词、剧情续写、战术建议。需要检定时用 ability_check/saving_throw。\n"
-            "信息不足时追问，记错/撤销用 undo_damage/undo_healing。\n"
-            "如果战斗开始（从记忆推断），可提醒跳过角色或建议投先攻。\n"
-            "DM 明确说进入战斗时，先确认参战者和优势劣势，再进入系统回合制。"
+            "信息不足时追问，记错/撤销用 undo_damage/undo_healing。"
         )
+        # ── 动态追加战斗指引（仅有战斗迹象时） ──
+        if campaign:
+            _recent_text = " ".join(
+                str(getattr(e, "content", "")) + " " + str(getattr(e, "metadata", {}).get("raw_player_input", ""))
+                for e in (db.scalars(
+                    select(CampaignEvent)
+                    .where(CampaignEvent.campaign_id == campaign.id)
+                    .order_by(CampaignEvent.created_at.desc()).limit(8)
+                ).all()) if e
+            ).lower()
+            _combat_signs = {"先攻", "initiative", "attack", "攻击", "伤害", "damage",
+                             "进入战斗", "start combat", "投掷", "检定", "豁免", "save"}
+            if any(kw.lower() in _recent_text for kw in _combat_signs):
+                _sys += (
+                    "\n\n[战斗感知] 最近事件中出现战斗行动。真人 DM 在管理回合，你可以：\n"
+                    "- 从事件序列推断大致轮到谁，提醒跳过角色或询问轮次\n"
+                    "- 不确定时问「刚才是Aric行动了，现在轮到谁？」\n"
+                    "- 以上全都是建议性的，不强制"
+                )
+                _dm_combat_words = {"进入战斗", "start combat", "管理系统战斗", "系统回合"}
+                if any(kw.lower() in _recent_text for kw in _dm_combat_words):
+                    _sys += (
+                        "\n\n[系统回合制待确认] DM 似乎想进入系统管理。回复：\n"
+                        "「准备进入系统回合制。请确认: 1)哪些角色参战 2)有无先攻优势/劣势？」\n"
+                        "不要自己决定参战者。继续以非管理模式处理，等 DM 确认后再投先攻。"
+                    )
     else:
         combat_instr = ""
         if campaign:
