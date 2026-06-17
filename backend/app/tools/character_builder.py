@@ -388,10 +388,20 @@ def parse_character_sheet_xlsx(file_path: Path) -> dict | None:
         except Exception:
             return ""
 
+    # ── Label filter ──
+    _labels = {"发色", "身高", "肤色", "体重", "瞳色", "背景故事",
+               "所选特点", "所选理想", "所选牵绊", "所选缺点",
+               "角色外貌", "角色形象", "背景语言", "背景装备",
+               "背景特性", "特殊选项", "技能熟练项", "工具熟练项"}
+
+    def _val(ws, coord):
+        v = _cell(ws, coord)
+        return "" if v in _labels else v
+
     # ── Identity ──
     result: dict = {
         "character_name": _cell(identity, "E3") or _cell(identity, "B3"),
-        "player_name": _cell(identity, "E4") or _cell(identity, "B4"),
+        "player_name": _val(identity, "E4") or _val(identity, "B4"),
         "ancestry": _cell(identity, "E6"),
         "alignment": _cell(identity, "M6"),
         "gender": _cell(identity, "E7"),
@@ -399,17 +409,17 @@ def parse_character_sheet_xlsx(file_path: Path) -> dict | None:
         "subrace": _cell(identity, "E8"),
         "faith": _cell(identity, "M8"),
         "background": _cell(identity, "E10"),
-        "hair": _cell(identity, "J10"),
-        "height": _cell(identity, "B11"),
-        "skin": _cell(identity, "J11"),
-        "weight": _cell(identity, "B12"),
-        "eyes": _cell(identity, "J12"),
-        "appearance": _cell(identity, "B15"),
-        "traits": _cell(identity, "R15"),
-        "ideals": _cell(identity, "R16"),
-        "bonds": _cell(identity, "R17"),
-        "flaws": _cell(identity, "R18"),
-        "backstory": _cell(identity, "R19"),
+        "hair": _val(identity, "J10"),
+        "height": _val(identity, "B11"),
+        "skin": _val(identity, "J11"),
+        "weight": _val(identity, "B12"),
+        "eyes": _val(identity, "J12"),
+        "appearance": _val(identity, "B15"),
+        "traits": _val(identity, "R15"),
+        "ideals": _val(identity, "R16"),
+        "bonds": _val(identity, "R17"),
+        "flaws": _val(identity, "R18"),
+        "backstory": _val(identity, "R19"),
     }
     if not result["character_name"]:
         return None
@@ -438,6 +448,11 @@ def parse_character_sheet_xlsx(file_path: Path) -> dict | None:
         result["armor_class"] = _cell(main_sheet, "P10") or ""
         result["speed"] = _cell(main_sheet, "AD17") or ""
         result["spellcasting_ability"] = _cell(main_sheet, "R17") or ""
+        # Map Chinese ability names to English keys
+        _chi_to_eng = {"力量": "str", "敏捷": "dex", "体质": "con", "智力": "int", "感知": "wis", "魅力": "cha"}
+        sa = result["spellcasting_ability"]
+        if sa in _chi_to_eng:
+            result["spellcasting_ability"] = _chi_to_eng[sa]
 
     return result
 
