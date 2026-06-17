@@ -32,6 +32,7 @@ class NapCatClient:
         self.base_url = base_url.rstrip("/")
         self.token = token.strip()
         self.self_id = self_id.strip()
+        self.self_ids: set[str] = {s.strip() for s in self_id.split(",") if s.strip()}
 
     @classmethod
     def from_settings(cls) -> "NapCatClient | None":
@@ -107,8 +108,10 @@ class NapCatClient:
         return list(data.get("messages") or [])
 
 
-def parse_event_text(payload: dict[str, Any], self_id: str = "") -> str:
+def parse_event_text(payload: dict[str, Any], self_ids: set[str] | str = "") -> str:
     message = payload.get("message")
+    if isinstance(self_ids, str):
+        self_ids = {s.strip() for s in self_ids.split(",") if s.strip()}
     if not isinstance(message, list):
         return " ".join(str(payload.get("raw_message") or message or "").split()).strip()
     parts: list[str] = []
@@ -116,7 +119,7 @@ def parse_event_text(payload: dict[str, Any], self_id: str = "") -> str:
         kind, data = segment.get("type"), segment.get("data") or {}
         if kind == "text":
             parts.append(str(data.get("text", "")))
-        elif kind == "at" and str(data.get("qq", "")).strip() != self_id:
+        elif kind == "at" and str(data.get("qq", "")).strip() not in self_ids:
             parts.append(f"@{data.get('qq')} ")
     return " ".join("".join(parts).split()).strip()
 
@@ -165,17 +168,19 @@ def attachment_segments(payload: dict[str, Any]) -> list[dict[str, str]]:
     return attachments
 
 
-def is_group_at_event(payload: dict[str, Any], self_id: str = "") -> bool:
+def is_group_at_event(payload: dict[str, Any], self_ids: set[str] | str = "") -> bool:
     if payload.get("message_type") != "group":
         return False
+    if isinstance(self_ids, str):
+        self_ids = {s.strip() for s in self_ids.split(",") if s.strip()}
     message = payload.get("message")
     if isinstance(message, list):
         return any(
             segment.get("type") == "at"
-            and str((segment.get("data") or {}).get("qq", "")).strip() == self_id
+            and str((segment.get("data") or {}).get("qq", "")).strip() in self_ids
             for segment in message
         )
-    return bool(self_id and f"[CQ:at,qq={self_id}]" in str(payload.get("raw_message") or ""))
+    return any(f"[CQ:at,qq={sid}]" in str(payload.get("raw_message") or "") for sid in self_ids)
 
 
 def is_supported_message(payload: dict[str, Any]) -> bool:
