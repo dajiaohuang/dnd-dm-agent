@@ -82,6 +82,12 @@ def append_event(db: Session, campaign_id: str, session_id: str | None, event_ty
     db.commit()
     index_event_memory(db, event, memory_plan)
     suggest_setting_updates_for_event(db, event)
+    # ── Auto-compress old events when threshold reached ──
+    try:
+        from app.memory_compressor import maybe_compress
+        maybe_compress(db, campaign_id, "")
+    except Exception:
+        pass  # Never block the main flow for compression failures
     return event
 
 
@@ -388,7 +394,6 @@ def resolve_chat(db: Session, campaign_id: str | None, session_id: str | None, c
         mode=mode, campaign=campaign, character=character, message=message, db=db,
     )
     _msgs = _system_msgs + [
-        {"role": "system", "content": context_prompt},
         {"role": "system", "content": context_prompt},
         {"role": "user", "content": message},
     ]
