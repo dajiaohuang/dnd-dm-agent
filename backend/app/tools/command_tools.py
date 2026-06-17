@@ -1222,6 +1222,37 @@ def handle_generate_npc_set(
     return _ok(f"后台开始生成 {count} 个 NPC（{batches} 批，每批 {batch_size} 个）。完成后自动通知。")
 
 
+
+def handle_generate_setting(
+    db: Session, campaign: Campaign,
+    category: str = "location", theme: str = "", count: int = 1, **_kw: Any,
+) -> dict:
+    """Enqueue background subagent to generate campaign setting(s)."""
+    if category not in {"location", "faction", "item", "event"}:
+        return _err(f"无效分类: {category}。可选: location/faction/item/event")
+    if count < 1:
+        return _err("数量至少为1。")
+    from app.db.models import TaskSession
+    from app.services import uid
+    from app.subagent_runner import enqueue_subagent_task
+
+    task = TaskSession(
+        id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
+        platform="system", chat_id=None, owner_user_id=None, session_id=None,
+        status="queued", priority=2, draft_data={},
+        proposal_data={
+            "agent_role": "campaign_setting_writer",
+            "proposal": {
+                "category": category, "theme": theme or campaign.name, "count": count,
+            },
+        },
+        missing_fields=[], next_prompt=f"{category} x{count}",
+    )
+    db.add(task); db.commit()
+    enqueue_subagent_task(task.id)
+    return _ok(f"后台开始生成 {category} 设定（{count} 个）。完成后自动通知。")
+
+
 def handle_switch_campaign(
     db: Session, campaign: Campaign,
     campaign_name: str = "", **_kw: Any,
@@ -1311,6 +1342,7 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "complete_character_sheet": handle_complete_character_sheet,
     "generate_cards_from_settings": handle_generate_cards_from_settings,
     "generate_npc_set": handle_generate_npc_set,
+    "generate_setting": handle_generate_setting,
     "check_background_tasks": handle_check_background_tasks,
     # Delegated to execute_command
     **_DELEGATED_HANDLERS,

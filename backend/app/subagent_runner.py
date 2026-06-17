@@ -43,6 +43,8 @@ def run_subagent_task(task_id: str) -> None:
                 result = complete_character_sheet(db, campaign, proposal_data)
             elif role == "npc_batch_worker":
                 result = generate_npc_batch(db, campaign, proposal_data)
+            elif role == "campaign_setting_writer":
+                result = generate_campaign_setting(db, campaign, proposal_data)
             elif role == "campaign_compressor":
                 result = compress_campaign_events(db, campaign, proposal_data)
             else:
@@ -280,6 +282,51 @@ def generate_npc_batch(db, campaign: Campaign, proposal_data: dict[str, Any]) ->
         "settings_published": len(published),
         "character_cards": len(card_names),
         "names": created,
+    }
+
+
+def generate_campaign_setting(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
+    """Background subagent: generate campaign setting (location/faction/item/event) via LLM."""
+    proposal = proposal_data.get("proposal") or {}
+    category = str(proposal.get("category", "location"))
+    theme = str(proposal.get("theme") or campaign.name or "fantasy")
+    count = int(proposal.get("count", 1))
+
+    cat_descriptions = {
+        "location": "a location with name, geography, key NPCs, history, secrets",
+        "faction": "a faction with name, leader, goals, members, rivals, secrets",
+        "item": "a magic item with name, type, rarity, attunement, powers",
+        "event": "a campaign event with name, timeline, key NPCs involved, consequences",
+    }
+    cat_desc = cat_descriptions.get(category, cat_descriptions["location"])
+
+    import json as _j
+    llm_result = chat_completion([{
+        "role": "system", "content": (
+            f"You are a D&D 5E worldbuilder. Generate {count} {category} setting(s) "
+            f"for a {theme} campaign. Each should be {cat_desc}. "
+            f"Return ONLY a JSON array of objects with keys: name, description."
+        ),
+    }, {"role": "user", "content": f"Generate {count} {category} setting(s) for {theme}."}],
+        temperature=0.8)
+
+    try:
+        items = _j.loads(llm_result or "[]")
+    except Exception:
+        items = [{"name": f"{theme} {category}", "description": "Generated setting."}]
+
+    from app.campaign_editor import create_draft, publish_drafts
+    for item in items:
+        create_draft(db, campaign.id, "create", proposal={
+            "category": category, "name": item.get("name", "?"),
+            "description": item.get("description", ""),
+        })
+    published = publish_drafts(db, campaign.id)
+    return {
+        "kind": "campaign_setting_written",
+        "category": category,
+        "count": len(published),
+        "names": [s.name for s in published],
     }
 
 
