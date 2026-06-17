@@ -554,8 +554,7 @@ def test_campaign_memory_three_stage_pipeline(monkeypatch):
             "memory_write_plan": {"extract_after_event": True, "intent_type": "character_action", "skip": False},
         }
 
-    monkeypatch.setattr("app.services.dm_graph.invoke", fake_graph)
-    monkeypatch.setattr("app.services.chat_completion", lambda messages: "The guard accepts your promise.")
+    monkeypatch.setattr("app.services.chat_completion", lambda messages, **kw: "The guard accepts your promise.")
     with TestClient(app) as client:
         client.post("/demo/bootstrap")
         old_event = client.post("/campaigns/campaign_001/events", json={
