@@ -79,6 +79,7 @@ def process_message(
         lines = [f"- {item['title']}: {item['description']}" for item in package["threads"]]
         return command_result("threads", "\n".join(lines) or "当前没有开放的剧情线。", data=package)
     dice_mode = (campaign.config or {}).get("play_style") == "dice_assistant"
+    lobby_mode = (campaign.config or {}).get("play_style") == "lobby"
     command = route_command(message)
     bound_character = db.get(Character, character_id) if character_id else None
     scope_platform, _scope_chat, scope_owner, scope_session = task_scope(
@@ -101,6 +102,11 @@ def process_message(
         if dice_mode and command.name != "start_combat":
             clear_dice_pending_state(db, campaign)
         return execute_command(db, command, campaign, session_id, actor_id, is_dm, message_context)
+
+    # ── Lobby mode → game-external management (non-command messages) ──
+    if lobby_mode:
+        from app.services import resolve_chat as _lobby_chat
+        return _lobby_chat(db, campaign.id, session_id, character_id, message, mode="lobby")
 
     # ── Dice mode: keep DM-confirmation fast path, rest handled by LLM tools ──
     if dice_mode:

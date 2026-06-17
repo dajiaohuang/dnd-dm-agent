@@ -180,7 +180,7 @@ async def napcat_callback(
             name=settings.napcat_campaign_id,
             system_version="DND_5E_2014",
             description="NapCat 自动创建",
-            config={"scene": "NapCat"},
+            config={"scene": "NapCat", "play_style": "lobby"},
         )
         db.add(campaign)
         db.commit()
