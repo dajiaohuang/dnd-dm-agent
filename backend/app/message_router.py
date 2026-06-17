@@ -84,13 +84,42 @@ def process_message(
     scope_platform, _scope_chat, scope_owner, scope_session = task_scope(
         message_context or {"platform": "web"}, actor_id, session_id,
     )
-    # ── Check for completed background subagent tasks ──
+    # ── Check for completed background subagent tasks (any owner) ──
     from app.task_sessions import ready_reviews, format_ready_reviews
-    _reviews = ready_reviews(db, campaign, scope_platform, scope_owner, scope_session)
-    if _reviews:
-        _review_text = format_ready_reviews(_reviews)
-        message = f"{message}\n\n[系统通知] 你的后台任务已完成。请在回复中自然地告知用户：\n{_review_text}"
-        for t in _reviews:
+    from app.db.models import TaskSession
+    from sqlalchemy import or_
+
+    # Find completed tasks: current user's + batch tasks for campaign
+    _my_reviews = ready_reviews(db, campaign, scope_platform, scope_owner, scope_session)
+    _all_campaign_reviews = db.scalars(
+        db.query(TaskSession).filter(
+            TaskSession.campaign_id == campaign.id,
+            TaskSession.task_type == "subagent_proposal",
+            TaskSession.status == "ready_to_review",
+            or_(TaskSession.owner_user_id != scope_owner, TaskSession.owner_user_id == scope_owner),
+        ).order_by(TaskSession.updated_at.desc())
+    ).all()
+    # Filter: only tasks that completed a batch (not mid-progress)
+    _batch_completions = [
+        t for t in _all_campaign_reviews
+        if (t.proposal_data or {}).get("kind") == "bulk_character_cards"
+        and t.id not in {r.id for r in _my_reviews}
+    ]
+    _pending_notification = ""
+    if _my_reviews:
+        _pending_notification += f"[PENDING FOR YOU]\n{format_ready_reviews(_my_reviews)}\n"
+    if _batch_completions:
+        names = []
+        for t in _batch_completions:
+            result = (t.proposal_data or {}).get("result") or {}
+            cards = result.get("characters") or []
+            names.extend(c.get("name", "?") for c in cards[:5])
+        _pending_notification += f"[BATCH COMPLETED] NPC角色卡已生成: {', '.join(names)} 等\n"
+    if _pending_notification:
+        message = f"{message}\n\n[系统通知]\n{_pending_notification}\n在回复末尾告知用户这些任务已完成。"
+        for t in _my_reviews:
+            t.status = "notified"
+        for t in _batch_completions:
             t.status = "notified"
         db.commit()
 
