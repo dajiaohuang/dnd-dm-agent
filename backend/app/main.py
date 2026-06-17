@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+import logging
 import shutil
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +15,7 @@ from app.db.models import (Campaign, CampaignCheckpoint, CampaignEntity, Campaig
                            CampaignSetting, CampaignSettingComment, CampaignSettingDraft, CampaignSettingHistory, CampaignSummary,
                            CampaignThread, Character, CharacterChange, CompendiumEntry, NapCatCharacterBinding,
                            TaskSession)
+from app.character_build_flow import _parse_fields
 from app.schemas import (CampaignCreate, CampaignPatch, CharacterCreate, CharacterPatch,
                          CharacterBuildRequest, ChatRequest, DiceRequest, EventCreate,
                          NapCatBindingUpsert, SettingDraftCreate, CampaignPackageImport, SettingCommentCreate,
@@ -27,6 +30,7 @@ from app.integrations.napcat import (NapCatAdapter, NapCatClient, callback_token
                                      message_text, parse_event_text, replied_message_id)
 from app.message_router import process_message
 from app.platform_adapter import handle_platform_message
+from app.commands import route_command
 from app.parsing.api import router as parsing_router
 from app.parsing.router import parse_files
 from app.tools.character_builder import build_character_data, export_character_sheet
@@ -93,6 +97,8 @@ app = FastAPI(title="Local DND DM Agent", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(parsing_router)
 
+_log = logging.getLogger(__name__)
+
 
 @app.get("/health")
 def health():
@@ -147,7 +153,11 @@ async def napcat_callback(
             reply_text = ""
     temp_root, paths, attachment_errors = download_attachments(client, payload)
     try:
-        parsed = parse_files(paths, per_file_max_chars=4000, total_max_chars=12000) if paths else None
+        try:
+            parsed = parse_files(paths, per_file_max_chars=4000, total_max_chars=12000) if paths else None
+        except Exception as exc:
+            parsed = None
+            attachment_errors.append(f"parse_error: {exc}")
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
 
@@ -159,7 +169,17 @@ async def napcat_callback(
 
     campaign = adapter.default_campaign(db)
     if not campaign:
-        raise HTTPException(404, f"NapCat campaign not found: {settings.napcat_campaign_id}")
+        campaign = Campaign(
+            id=settings.napcat_campaign_id,
+            name=settings.napcat_campaign_id,
+            system_version="DND_5E_2014",
+            description="NapCat 自动创建",
+            config={"scene": "NapCat"},
+        )
+        db.add(campaign)
+        db.commit()
+        db.refresh(campaign)
+        set_active_napcat_campaign(db, campaign)
     group_id = str(payload.get("group_id", "")).strip()
     group_history: list[dict] = []
     group_history_error = ""
@@ -179,6 +199,285 @@ async def napcat_callback(
             ]
         except Exception as exc:
             group_history_error = str(exc)
+
+    command = route_command(text)
+
+    # ═══════════════════════════════════════════
+    # ── /创建角色 名称:xxx 职业:xxx 等级:x ──
+    # ═══════════════════════════════════════════
+    if command and command.name == "create_character_quick":
+        user_id = str(payload.get("user_id", "")).strip()
+        parsed_fields = _parse_fields(text)
+        char_name = parsed_fields.get("character_name", "").strip()
+        class_name = parsed_fields.get("class_name", "").strip()
+        if not char_name or not class_name:
+            response = {
+                "reply": "格式：/创建角色 名称:xxx 职业:xxx [等级:x] [种族:xxx] [背景:xxx]\n示例：/创建角色 名称:卡利恩 职业:法师 等级:3 种族:人类",
+                "auto_escape": False, "at_sender": False,
+            }
+            response["parsed_attachments"] = parsed
+            response["attachment_errors"] = attachment_errors
+            return response
+        raw: dict[str, Any] = {
+            "character_name": char_name, "class_name": class_name, "player_name": user_id,
+            "actor_type": "player",
+            "level": parsed_fields.get("level", 1),
+            "ancestry": parsed_fields.get("ancestry", "人类"),
+            "background": parsed_fields.get("background", ""),
+            "alignment": parsed_fields.get("alignment", ""),
+            "abilities": parsed_fields.get("abilities", {}),
+        }
+        char_data = build_character_data(raw)
+        character = Character(
+            id=uid("char"), campaign_id=campaign.id,
+            player_name=user_id, character_name=char_name, data=char_data,
+        )
+        db.add(character)
+        if user_id.isdigit():
+            bind_qq(db, campaign.id, user_id, character, char_name)
+        db.commit()
+        response = {
+            "reply": f"角色卡已创建：{char_name}（{character.id}）\n职业：{class_name} 等级：{raw['level']}\n已自动绑定到你的QQ。发送 /导出角色卡 下载。",
+            "auto_escape": False, "at_sender": False,
+        }
+        response["parsed_attachments"] = parsed
+        response["attachment_errors"] = attachment_errors
+        return response
+
+    # ═══════════════════════════════════════════
+    # ── /创建NPC 名称:xxx 职业:xxx ──
+    # ═══════════════════════════════════════════
+    if command and command.name == "create_npc_quick":
+        parsed_fields = _parse_fields(text)
+        npc_name = parsed_fields.get("character_name", "").strip()
+        class_name = parsed_fields.get("class_name", "").strip()
+        if not npc_name or not class_name:
+            response = {
+                "reply": "格式：/创建NPC 名称:xxx 职业:xxx [等级:x] [种族:xxx] [属性:str=10,dex=12]\n示例：/创建NPC 名称:卫兵队长 职业:战士 等级:5 种族:人类",
+                "auto_escape": False, "at_sender": False,
+            }
+            response["parsed_attachments"] = parsed
+            response["attachment_errors"] = attachment_errors
+            return response
+        raw: dict[str, Any] = {
+            "character_name": npc_name, "class_name": class_name, "player_name": "DM",
+            "actor_type": "npc",
+            "level": parsed_fields.get("level", 1),
+            "ancestry": parsed_fields.get("ancestry", "人类"),
+            "alignment": parsed_fields.get("alignment", ""),
+            "abilities": parsed_fields.get("abilities", {}),
+        }
+        char_data = build_character_data(raw)
+        npc = Character(
+            id=uid("char"), campaign_id=campaign.id,
+            player_name="DM", character_name=npc_name, data=char_data,
+        )
+        db.add(npc)
+        db.commit()
+        response = {
+            "reply": f"NPC 角色卡已创建：{npc_name}（{npc.id}）\n职业：{class_name} 等级：{raw['level']}\n发送 /导出角色卡 可下载 xlsx。",
+            "auto_escape": False, "at_sender": False,
+        }
+        response["parsed_attachments"] = parsed
+        response["attachment_errors"] = attachment_errors
+        return response
+
+    # ═══════════════════════════════════════════
+    # ── /保存设定 NPC/地点/组织 名称 描述 ──
+    # ═══════════════════════════════════════════
+    if command and command.name == "save_campaign_setting":
+        parts = text.split(maxsplit=3)
+        if len(parts) < 3:
+            response = {
+                "reply": "格式：/保存设定 类型 名称 描述\n类型：NPC / 地点 / 组织 / 物品 / 事件\n示例：/保存设定 NPC 玛莎·灰烬 古雾镇的面包师，善良阵营",
+                "auto_escape": False, "at_sender": False,
+            }
+            response["parsed_attachments"] = parsed
+            response["attachment_errors"] = attachment_errors
+            return response
+        cat_map = {"npc": "npc", "地点": "location", "组织": "faction", "物品": "item", "事件": "event"}
+        cat_input = parts[1].strip()
+        category = cat_map.get(cat_input, cat_input)
+        setting_name = parts[2].strip()
+        description = parts[3].strip() if len(parts) > 3 else ""
+        setting = CampaignSetting(
+            id=uid("setting"), campaign_id=campaign.id,
+            category=category, name=setting_name,
+            summary=description[:200],
+            content={"description": description},
+            status="published", version=1,
+        )
+        db.add(setting)
+        db.commit()
+        response = {
+            "reply": f"设定已保存：[{category}] {setting_name}（{setting.id}）\n当前战役共有 {db.query(CampaignSetting).filter(CampaignSetting.campaign_id == campaign.id).count()} 条设定。",
+            "auto_escape": False, "at_sender": False,
+        }
+        response["parsed_attachments"] = parsed
+        response["attachment_errors"] = attachment_errors
+        return response
+
+    # ── 角色绑定（QQ 绑定到已有角色） ──
+    if command and command.name == "bind_character":
+        user_id = str(payload.get("user_id", "")).strip()
+        print(f"[bind] user_id={user_id} campaign={campaign.id}", flush=True)
+        # 从 integrations.qq_user_ids 查找该用户已关联的角色
+        all_campaign_chars = db.scalars(
+            select(Character).where(Character.campaign_id == campaign.id)
+        ).all()
+        matched: list[Character] = []
+        for ch in all_campaign_chars:
+            qq_ids = [str(q).strip() for q in ((ch.data.get("integrations") or {}).get("qq_user_ids") or [])]
+            if user_id in qq_ids:
+                matched.append(ch)
+        if not matched:
+            response = {
+                "reply": (
+                    "在当前战役中没有找到你的角色卡。\n"
+                    "请先使用 /车卡 创建角色，创建完成后会自动绑定。\n"
+                    "如果你已经在 Web 端创建了角色，请在角色卡的 QQ 绑定设置中添加你的 QQ 号。"
+                ),
+                "auto_escape": False, "at_sender": False,
+            }
+            response["parsed_attachments"] = parsed
+            response["attachment_errors"] = attachment_errors
+            return response
+        # 创建正式绑定
+        bound_names: list[str] = []
+        for ch in matched:
+            existing = find_binding(db, campaign.id, user_id, ch.id)
+            if existing:
+                bound_names.append(ch.character_name or ch.id)
+                continue
+            binding = NapCatCharacterBinding(
+                id=uid("ncb"), campaign_id=campaign.id,
+                qq_user_id=user_id, character_id=ch.id,
+                display_name=ch.character_name or ch.id,
+            )
+            db.add(binding)
+            bound_names.append(ch.character_name or ch.id)
+        db.commit()
+        response = {
+            "reply": f"已绑定角色卡：{'、'.join(bound_names)}。现在可以使用 /导出角色卡 下载了。",
+            "auto_escape": False, "at_sender": False,
+        }
+        response["parsed_attachments"] = parsed
+        response["attachment_errors"] = attachment_errors
+        return response
+
+    # ── 查看绑定（返回真实数据库绑定信息） ──
+    if command and command.name == "show_bindings":
+        user_id = str(payload.get("user_id", "")).strip()
+        bindings = find_bindings(db, campaign.id, user_id)
+        # 同时检查 integrations.qq_user_ids
+        all_campaign_chars = db.scalars(
+            select(Character).where(Character.campaign_id == campaign.id)
+        ).all()
+        unbound: list[str] = []
+        for ch in all_campaign_chars:
+            qq_ids = [str(q).strip() for q in ((ch.data.get("integrations") or {}).get("qq_user_ids") or [])]
+            if user_id in qq_ids and not any(b.character_id == ch.id for b in bindings):
+                unbound.append(ch.character_name or ch.id)
+        if not bindings and not unbound:
+            response = {
+                "reply": (
+                    "你当前没有任何角色绑定。\n"
+                    "绑定方式：\n"
+                    "1. QQ 中发送 /车卡 创建角色，完成后自动绑定\n"
+                    "2. Web 端角色卡设置中添加 QQ 号后，发送 /绑定角色"
+                ),
+                "auto_escape": False, "at_sender": False,
+            }
+        else:
+            lines: list[str] = []
+            if bindings:
+                lines.append(f"=== 已绑定角色（{len(bindings)}）===")
+                for b in bindings:
+                    ch = db.get(Character, b.character_id)
+                    name = ch.character_name if ch else "(角色已删除)"
+                    lines.append(f"  - {name} ({b.character_id})")
+            if unbound:
+                lines.append(f"=== 可绑定的角色（{len(unbound)}）===")
+                for name in unbound:
+                    lines.append(f"  - {name}  → 发送 /绑定角色 完成绑定")
+            lines.append("发送 /导出角色卡 下载角色卡")
+            response = {
+                "reply": "\n".join(lines),
+                "auto_escape": False, "at_sender": False,
+            }
+        response["parsed_attachments"] = parsed
+        response["attachment_errors"] = attachment_errors
+        return response
+
+    # ── 角色卡导出（NapCat QQ 文件上传） ──
+    _log.info("napcat_callback text=%r command=%s", text, command.name if command else None)
+    if command and command.name == "export_character_sheet":
+        user_id = str(payload.get("user_id", "")).strip()
+        print(f"[export] user_id={user_id} campaign={campaign.id}", flush=True)
+        bindings = find_bindings(db, campaign.id, user_id)
+        print(f"[export] bindings count={len(bindings)}", flush=True)
+        # 无绑定时，尝试从 integrations.qq_user_ids 查找角色
+        if not bindings:
+            all_campaign_chars = db.scalars(
+                select(Character).where(Character.campaign_id == campaign.id)
+            ).all()
+            for ch in all_campaign_chars:
+                qq_ids = (ch.data.get("integrations") or {}).get("qq_user_ids") or []
+                if user_id in [str(q).strip() for q in qq_ids]:
+                    bindings.append(NapCatCharacterBinding(
+                        id=uid("ncb"), campaign_id=campaign.id,
+                        qq_user_id=user_id, character_id=ch.id,
+                        display_name=ch.character_name or ch.id,
+                    ))
+        if not bindings:
+            response = {
+                "reply": "你还没有绑定角色卡。请先使用 /车卡 创建角色，或让 DM 为你绑定角色。",
+                "auto_escape": False, "at_sender": False,
+            }
+            response["parsed_attachments"] = parsed
+            response["attachment_errors"] = attachment_errors
+            return response
+        target_dir = settings.data_dir / "generated" / "characters"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        exported_names: list[str] = []
+        upload_errors: list[str] = []
+        for binding in bindings:
+            character = db.get(Character, binding.character_id)
+            if not character:
+                upload_errors.append(f"角色 {binding.character_id} 不存在")
+                continue
+            template = next((settings.data_dir / "raw").glob("*人物卡模板.xlsx"), None)
+            if not template:
+                upload_errors.append("人物卡模板文件未找到")
+                continue
+            target = target_dir / f"{character.id}.xlsx"
+            try:
+                export_character_sheet(character.data, character.player_name or "", Path(template), target)
+                name = f"{character.character_name or character.id}.xlsx"
+                print(f"[export] generated {target}, uploading as {name}", flush=True)
+                if payload.get("message_type") == "group":
+                    result = client.upload_group_file(group_id, str(target), name)
+                else:
+                    result = client.upload_private_file(user_id, str(target), name)
+                print(f"[export] upload result: {result}", flush=True)
+                exported_names.append(character.character_name or binding.character_id)
+            except Exception as exc:
+                print(f"[export] ERROR: {exc}", flush=True)
+                upload_errors.append(f"{character.character_name}: {exc}")
+        reply_parts: list[str] = []
+        if exported_names:
+            reply_parts.append(f"已导出角色卡：{'、'.join(exported_names)}")
+        if upload_errors:
+            reply_parts.append(f"导出失败：{'；'.join(upload_errors)}")
+        response = {
+            "reply": "\n".join(reply_parts) or "导出角色卡失败",
+            "auto_escape": False,
+            "at_sender": False,
+        }
+        response["parsed_attachments"] = parsed
+        response["attachment_errors"] = attachment_errors
+        return response
+
     response = handle_platform_message(
         db,
         adapter,
@@ -191,6 +490,13 @@ async def napcat_callback(
         ),
         process_fn=process_message,
     )
+    # 附件错误反馈到 QQ 用户
+    if attachment_errors and response.get("reply"):
+        error_note = "\n\n[附件处理问题] " + "；".join(attachment_errors)
+        if isinstance(response["reply"], str):
+            response["reply"] += error_note
+        elif isinstance(response["reply"], list):
+            response["reply"].append({"type": "text", "data": {"text": error_note}})
     response["parsed_attachments"] = parsed
     response["attachment_errors"] = attachment_errors
     return response

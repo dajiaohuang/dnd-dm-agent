@@ -30,7 +30,7 @@ ABILITY_ALIASES = {
 }
 FIELD_ALIASES = {
     "姓名": "character_name", "名字": "character_name", "角色名": "character_name",
-    "name": "character_name", "character": "character_name",
+    "名称": "character_name", "name": "character_name", "character": "character_name",
     "职业": "class_name", "class": "class_name",
     "种族": "ancestry", "race": "ancestry", "ancestry": "ancestry",
     "背景": "background", "background": "background",
@@ -109,7 +109,7 @@ def _parse_fields(text: str) -> dict[str, Any]:
         elif field:
             result[field] = raw
     for label, ability in ABILITY_ALIASES.items():
-        match = re.search(rf"{re.escape(label)}\s*(\d{{1,2}})", text, re.IGNORECASE)
+        match = re.search(rf"{re.escape(label)}\s*[=：: ]?\s*(\d{{1,2}})", text, re.IGNORECASE)
         if match:
             abilities[ability] = int(match.group(1))
     if abilities:

@@ -521,6 +521,7 @@ def parse_file(
     if suffix in {".docx", ".doc"}:
         if _has_module("docx"):
             return _run(lambda: _parse_docx(path, max_chars))
+        return _result_err(path, "python-docx backend is not installed; cannot parse .docx/.doc files")
     if suffix in TEXT_SUFFIXES:
         return _run(lambda: _parse_text(path, max_chars))
     if suffix == ".zip":

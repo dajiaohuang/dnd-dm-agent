@@ -180,14 +180,14 @@ def test_natural_campaign_admin_commands_switch_and_delete_active_campaign():
     with TestClient(app) as client:
         client.post("/demo/bootstrap")
         created = client.post("/chat/campaign_001", json={
-            "session_id": "admin", "message": "创建新战役",
+            "session_id": "admin", "message": "/新建战役",
         }).json()
         assert created["command"] == "create_campaign_from_prompt"
         new_campaign = created["data"]["campaign"]
         assert client.get("/napcat/active-campaign").json()["id"] == new_campaign["id"]
 
         deleted = client.post(f"/chat/{new_campaign['id']}", json={
-            "session_id": "admin", "message": "删除现在的战役",
+            "session_id": "admin", "message": "/删除战役",
         }).json()
         assert deleted["command"] == "delete_active_campaign"
         assert "已删除当前战役" in deleted["narration"]
@@ -206,7 +206,7 @@ def test_create_campaign_from_prompt_inherits_dice_context():
             "pending_generated_campaign_name": "灰烬潮汐",
         }})
         created = client.post("/chat/campaign_001", json={
-            "session_id": "admin", "message": "创建新战役",
+            "session_id": "admin", "message": "/新建战役",
         }).json()
         new_campaign = created["data"]["campaign"]
         status = client.get(f"/campaigns/{new_campaign['id']}/status").json()
@@ -281,7 +281,7 @@ def test_parallel_character_build_sessions_do_not_cross_talk(monkeypatch):
             "session_id": "group_a", "player_id": "alice", "message": "查看车卡",
         }).json()["narration"]
         bob_draft = client.post(f"/chat/{campaign['id']}", json={
-            "session_id": "group_b", "player_id": "bob", "message": "查看车卡",
+            "session_id": "group_b", "player_id": "bob", "message": "/查看车卡",
         }).json()["narration"]
         assert "Luna" in alice_draft and "Brak" not in alice_draft
         assert "Brak" in bob_draft and "Luna" not in bob_draft
@@ -326,13 +326,13 @@ def test_character_build_can_be_exited_with_natural_cancel_phrases():
         assert started["command"] == "character_build"
 
         exited = client.post(f"/chat/{campaign['id']}", json={
-            "session_id": "group", "player_id": "alice", "message": "退出车卡",
+            "session_id": "group", "player_id": "alice", "message": "/退出车卡",
         }).json()
         assert exited["command"] == "character_build"
         assert "已取消你的车卡草稿" in exited["narration"]
 
         status = client.post(f"/chat/{campaign['id']}", json={
-            "session_id": "group", "player_id": "alice", "message": "查看战役",
+            "session_id": "group", "player_id": "alice", "message": "/status",
         }).json()
         assert status["command"] == "status"
 

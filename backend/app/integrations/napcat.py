@@ -78,6 +78,30 @@ class NapCatClient:
     def get_message(self, message_id: str | int) -> dict[str, Any]:
         return (self.post_action("get_msg", {"message_id": int(message_id)}).get("data") or {})
 
+    def upload_private_file(self, user_id: str | int, file_path: str, name: str) -> dict[str, Any]:
+        return self._post_action_long("upload_private_file", {
+            "user_id": int(user_id),
+            "file": str(file_path),
+            "name": name,
+        })
+
+    def upload_group_file(self, group_id: str | int, file_path: str, name: str) -> dict[str, Any]:
+        return self._post_action_long("upload_group_file", {
+            "group_id": int(group_id),
+            "file": str(file_path),
+            "name": name,
+        })
+
+    def _post_action_long(self, action: str, payload: dict[str, Any], timeout: int = 60) -> dict[str, Any]:
+        response = httpx.post(
+            f"{self.base_url}/{action}", headers=self.headers(), json=payload, timeout=timeout
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("status") not in {None, "ok"}:
+            raise RuntimeError(f"NapCat action failed: {data}")
+        return data
+
     def get_group_history(self, group_id: str | int, count: int = 20) -> list[dict[str, Any]]:
         data = self.post_action("get_group_msg_history", {"group_id": int(group_id), "count": count}).get("data") or {}
         return list(data.get("messages") or [])

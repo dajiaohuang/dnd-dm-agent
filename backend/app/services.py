@@ -386,95 +386,108 @@ def resolve_chat(db: Session, campaign_id: str, session_id: str | None, characte
     result_data = {}
     actors = [character_id] if character_id else []
 
-    is_potion = any(word in text for word in ["potion", "药水", "治療藥水", "治疗药水"])
-    is_social = any(word in text for word in ["说服", "說服", "persuade", "persuasion", "交涉"])
-    is_rest = any(word in text for word in ["long rest", "长休", "長休", "short rest", "短休"])
+    # All mechanical actions (potion, rest, social) now handled by LLM tools
+    combat_instructions = _combat_output_instructions(campaign) if campaign else ""
+    _sys = (
+        "You are a concise DND Dungeon Master. Continue from established campaign memory. "
+        "Use the current character sheet and relevant rules. Do not invent mechanical state changes. "
+        "Never stop to ask a player to roll dice; state the required roll clearly so the system can "
+        f"roll it immediately and continue. {combat_instructions}"
+        "When the user asks to drink a potion, take a rest, make a skill check, create a character, "
+        "save a setting, check bindings, or export a sheet, use a function call rather than narrating it."
+    )
+    _msgs = [
+        {"role": "system", "content": _sys},
+        {"role": "system", "content": context_prompt},
+        {"role": "user", "content": message},
+    ]
+    _fallback_text = (
+        "行动已记录，未产生可确认的机械状态变化。"
+        if combat_instructions
+        else "你的行动让局势继续向前推进。四周的目光落在你身上，等待你作出下一步选择。"
+    )
 
-    if is_potion and character:
-        inventory = character.data.get("inventory", [])
-        potion = next((x for x in inventory if x.get("item_id") == "potion_healing" and x.get("quantity", 0) > 0), None)
-        if not potion:
-            narration = "你翻遍背包，却没有找到可用的治疗药水。"
+    # Try tool-enabled LLM call; fall back to plain chat_completion if no tools triggered
+    _tool_used = False
+    try:
+        from app.tools.command_tools import TOOL_HANDLERS, tools_for_scope
+        _tools = tools_for_scope(campaign, is_dm=False)
+        _resp = chat_completion(_msgs, temperature=0.7, tools=_tools)
+    except Exception:
+        _resp = None
+
+    if _resp is not None and not isinstance(_resp, str) and _resp.tool_calls:
+        _tool_used = True
+        import json as _json
+        for tc in _resp.tool_calls:
+            handler = TOOL_HANDLERS.get(tc.function.name)
+            try:
+                _args = _json.loads(tc.function.arguments or "{}")
+            except _json.JSONDecodeError:
+                _args = {}
+            _args.setdefault("db", db)
+            _args.setdefault("campaign", campaign)
+            _args.setdefault("user_id", "")
+            if handler:
+                try:
+                    _tr = handler(**{k: v for k, v in _args.items()
+                        if k in {"db", "campaign", "character_name", "class_name",
+                                  "level", "ancestry", "background", "abilities",
+                                  "category", "name", "description", "query",
+                                  "user_id", "player_name"}})
+                except Exception as exc:
+                    _tr = {"ok": False, "narration": f"工具执行失败: {exc}"}
+            else:
+                _tr = {"ok": False, "narration": f"未知工具: {tc.function.name}"}
+            _msgs.append({
+                "role": "assistant", "content": _resp.content,
+                "tool_calls": [{"id": tc.id, "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments}}],
+            })
+            _msgs.append({"role": "tool", "tool_call_id": tc.id,
+                "content": _json.dumps(_tr, ensure_ascii=False, default=str)})
+        try:
+            _resp2 = chat_completion(_msgs, temperature=0.7, tools=_tools)
+            if _resp2 is not None and not isinstance(_resp2, str):
+                narration = _resp2.content
+            else:
+                narration = _resp2 if isinstance(_resp2, str) else None
+        except Exception:
+            narration = None
+        narration = narration or _fallback_text
+
+    if not _tool_used:
+        if isinstance(_resp, str):
+            narration = _resp or _fallback_text
+        elif _resp is not None and _resp.content:
+            narration = _resp.content
         else:
-            roll = roll_dice("2d4+2")
-            before_hp = character.data.get("combat", {}).get("current_hp", 0)
-            max_hp = character.data.get("combat", {}).get("max_hp", before_hp)
-            after_hp = min(max_hp, before_hp + roll["total"])
-            new_inventory = copy.deepcopy(inventory)
-            next(x for x in new_inventory if x.get("item_id") == "potion_healing")["quantity"] -= 1
-            update_character(db, character, {"combat": {"current_hp": after_hp}, "inventory": new_inventory},
-                             "drank a Potion of Healing", "consume_item", ["potion_healing"])
-            rolls.append(roll)
-            changes = [{"type": "hp_change", "before": before_hp, "after": after_hp},
-                       {"type": "inventory_change", "item_id": "potion_healing", "delta": -1}]
-            narration = f"你饮下猩红药液，暖意迅速漫过伤口。治疗 {roll['total']} 点，生命值从 {before_hp}/{max_hp} 恢复到 {after_hp}/{max_hp}。"
-    elif is_social:
-        bonus = 0
-        if character:
-            effective = resolve_effective_character(
-                character.data, bool(((campaign.config or {}).get("turn_state") or {}).get("combat")),
-            )["effective"]
-            persuasion = (effective.get("skills") or {}).get("persuasion", 0)
-            bonus = int(persuasion.get("bonus", 0) if isinstance(persuasion, dict) else persuasion)
-        roll = roll_dice(f"1d20{bonus:+d}")
-        rolls.append(roll)
-        dc = 13
-        success = roll["total"] >= dc
-        narration = (f"对方认真听完了你的陈述。Persuasion 检定 {roll['total']}，DC {dc}。"
-                     + ("他的态度缓和下来，愿意给你一个机会。" if success else "他仍保持警惕，暂时没有让步。"))
-    elif is_rest and character:
-        combat = character.data.get("combat", {})
-        before_hp, max_hp = combat.get("current_hp", 0), combat.get("max_hp", 0)
-        trigger = "long_rest" if any(word in text for word in ["long rest", "长休", "長休"]) else "short_rest"
-        next_data, expired = advance_effect_durations(character.data, trigger)
-        update_character(
-            db, character,
-            {"combat": {"current_hp": max_hp}, "active_effects": next_data.get("active_effects", [])},
-            "completed a rest", "rest", [item["definition_id"] for item in expired],
+            narration = chat_completion(_msgs) or _fallback_text
+    requested_formula = _requested_roll(narration)
+    automatic_roll_count = 0
+    if requested_formula and campaign and bool(((campaign.config or {}).get("turn_state") or {}).get("combat")):
+        window = open_reaction_window(db, campaign, narration, requested_formula, character.id if character else None)
+        if window:
+            resolved = resolve_ready_reaction_window(db, campaign, window)
+            if resolved:
+                narration = resolved["narration"]
+                rolls.extend(resolved["rolls"])
+                result_data.update(resolved["data"])
+                requested_formula = None
+            else:
+                narration = format_reaction_prompt(window)
+                requested_formula = None
+                result_data.update({
+                    "turn_consuming": False,
+                    "reaction_notifications": reaction_notifications(window),
+                })
+    while requested_formula and automatic_roll_count < 4:
+        narration, automatic_roll = _finish_requested_roll(
+            context_prompt, message, narration, requested_formula, combat_instructions,
         )
-        changes = [{"type": "hp_change", "before": before_hp, "after": max_hp}]
-        narration = f"休整结束，你重新振作起来。生命值恢复至 {max_hp}/{max_hp}。"
-    else:
-        combat_instructions = _combat_output_instructions(campaign) if campaign else ""
-        narration = chat_completion([
-            {"role": "system", "content": (
-                "You are a concise DND Dungeon Master. Continue from established campaign memory. "
-                "Use the current character sheet and relevant rules. Do not invent mechanical state changes. "
-                "Never stop to ask a player to roll dice; state the required roll clearly so the system can "
-                f"roll it immediately and continue. {combat_instructions}"
-            )},
-            {"role": "system", "content": context_prompt},
-            {"role": "user", "content": message},
-        ]) or (
-            "行动已记录，未产生可确认的机械状态变化。"
-            if combat_instructions
-            else "你的行动让局势继续向前推进。四周的目光落在你身上，等待你作出下一步选择。"
-        )
+        rolls.append(automatic_roll)
+        automatic_roll_count += 1
         requested_formula = _requested_roll(narration)
-        automatic_roll_count = 0
-        if requested_formula and campaign and bool(((campaign.config or {}).get("turn_state") or {}).get("combat")):
-            window = open_reaction_window(db, campaign, narration, requested_formula, character.id if character else None)
-            if window:
-                resolved = resolve_ready_reaction_window(db, campaign, window)
-                if resolved:
-                    narration = resolved["narration"]
-                    rolls.extend(resolved["rolls"])
-                    result_data.update(resolved["data"])
-                    requested_formula = None
-                else:
-                    narration = format_reaction_prompt(window)
-                    requested_formula = None
-                    result_data.update({
-                        "turn_consuming": False,
-                        "reaction_notifications": reaction_notifications(window),
-                    })
-        while requested_formula and automatic_roll_count < 4:
-            narration, automatic_roll = _finish_requested_roll(
-                context_prompt, message, narration, requested_formula, combat_instructions,
-            )
-            rolls.append(automatic_roll)
-            automatic_roll_count += 1
-            requested_formula = _requested_roll(narration)
 
     metadata = {"raw_player_input": message, "dm_response": narration, "rolls": rolls, "state_changes": changes,
                 "intent": graph_state.get("intent"), "ruling": graph_state.get("ruling"),

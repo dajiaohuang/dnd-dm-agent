@@ -6,7 +6,9 @@ from app.main import app
 
 
 def test_dice_assistant_natural_command_alias():
-    assert route_command("骰娘模式").name == "enter_dice_assistant"
+    # natural-language phrases removed: LLM handles them now via function-calling tools.
+    # Only exact /slash commands remain as fast-path.
+    assert route_command("/骰娘").name == "enter_dice_assistant"
 
 
 def test_dice_assistant_automatically_executes_requested_roll(monkeypatch):
@@ -284,7 +286,7 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
         setup = client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "开始战斗"}).json()
         assert "哪些角色参战" in setup["narration"]
         status_during_setup = client.post(f"/chat/{campaign_id}", json={
-            "session_id": "dice", "message": "查看战役",
+            "session_id": "dice", "message": "/status",
         }).json()
         assert status_during_setup["command"] == "status"
         assert "Actors and Dice" in status_during_setup["narration"]
@@ -296,7 +298,7 @@ def test_dm_actors_roleplay_presence_and_dice_assistant(monkeypatch):
 
         client.post(f"/chat/{campaign_id}", json={"session_id": "dice", "message": "开始战斗"})
         exited_pending_combat = client.post(f"/chat/{campaign_id}", json={
-            "session_id": "dice", "message": "退出战斗",
+            "session_id": "dice", "message": "/endcombat",
         }).json()
         assert exited_pending_combat["command"] == "end_combat"
         assert not client.post(f"/chat/{campaign_id}", json={
@@ -375,7 +377,7 @@ def test_dice_dm_confirmation_can_be_cancelled_or_bypassed_by_safe_commands(monk
         assert entered["data"]["dm_confirmation_pending"]
 
         status = client.post(f"/chat/{campaign['id']}", json={
-            "session_id": "dice", "player_id": "player", "message": "查看战役",
+            "session_id": "dice", "player_id": "player", "message": "/status",
         }).json()
         assert status["command"] == "status"
 
@@ -410,7 +412,7 @@ def test_dice_assistant_blocks_campaign_admin_natural_language_from_rule_fallbac
             "config": {"play_style": "dice_assistant"},
         }).json()
         result = client.post(f"/chat/{campaign['id']}", json={
-            "session_id": "dice", "message": "保存现在的设定",
+            "session_id": "dice", "message": "/publishsettings",
         }).json()
         assert result["command"] == "publish_settings"
         assert "骰娘模式不管理预设战役剧情或设定编辑" in result["narration"]

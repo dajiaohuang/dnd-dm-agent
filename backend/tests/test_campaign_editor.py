@@ -115,11 +115,11 @@ def test_campaign_edit_mode_allows_safe_commands_and_exit():
         assert entered["ok"]
 
         status = client.post(f"/chat/{campaign['id']}", json={
-            "session_id": "edit", "message": "查看战役",
+            "session_id": "edit", "message": "/status",
         }).json()
         assert status["command"] == "status"
 
         exited = client.post(f"/chat/{campaign['id']}", json={
-            "session_id": "edit", "message": "退出编辑",
+            "session_id": "edit", "message": "/exitedit",
         }).json()
         assert exited["command"] == "exit_campaign_edit"

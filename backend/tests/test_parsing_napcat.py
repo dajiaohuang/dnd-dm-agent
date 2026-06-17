@@ -352,7 +352,7 @@ def test_napcat_campaign_creation_in_dice_mode_routes_follow_up_to_new_campaign(
             "post_type": "message",
             "message_type": "private",
             "user_id": 456,
-            "message": [{"type": "text", "data": {"text": "给设定故事里的npc都按照设定创建角色卡"}}],
+            "message": [{"type": "text", "data": {"text": "/createnpcs"}}],
         })
         assert routed.status_code == 200
         assert routed.json()["result"]["command"] == "create_npc_cards_from_settings"

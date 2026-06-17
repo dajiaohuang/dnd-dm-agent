@@ -167,6 +167,7 @@ def execute_command(
             "/退出骰娘 - 返回战役叙事模式（DM）\n"
             "/combatroleplayon|off - 开关当前玩法的战斗扮演文字（DM 模式默认开，骰娘默认关）\n"
             "/combatadviceon|off - 开关当前玩法的战斗行动建议（DM 模式默认开，骰娘默认关）\n"
+            "/导出角色卡 - 导出绑定的角色卡为 XLSX 文件\n"
             "/法术 法术名 - 直接查询合并法术表"
         ))
 
@@ -462,6 +463,27 @@ def execute_command(
             "created_by": actor_id,
         })
         return command_result("resume", f"战役“{campaign.name}”已继续。")
+
+    if command.name == "show_bindings":
+        return command_result(
+            "show_bindings",
+            "请在 QQ 中使用 /查看绑定 命令来查看绑定的角色卡，或在 Web 端 /napcat/bindings 查看。",
+            data={"tip": "use_qq_command"},
+        )
+
+    if command.name == "bind_character":
+        return command_result(
+            "bind_character",
+            "请在 QQ 中使用 /绑定角色 命令来绑定角色卡，或在 Web 端角色卡设置中配置 QQ 绑定。",
+            data={"tip": "use_qq_command"},
+        )
+
+    if command.name == "export_character_sheet":
+        return command_result(
+            "export_character_sheet",
+            "请在 QQ 中使用 /导出角色卡 命令来下载角色卡 XLSX 文件，或使用 GET /characters/{character_id}/sheet 接口。",
+            data={"tip": "use_qq_command_or_api"},
+        )
 
     return command_result(command.name, "未知命令。", ok=False)
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Campaign, CampaignEvent, CampaignSummary, Character, TaskSession
 from app.services import search_rules, update_character
 from app.llm import chat_completion
+from app.tools.command_tools import TOOL_HANDLERS, tools_for_scope
 from app.campaign_memory import build_memory_package
 from app.campaign_editor import search_settings
 from app.config import settings
@@ -258,7 +259,14 @@ def dice_context_action(
         }
         return result
 
-    if memory_task or legacy_memory_pending:
+    # Memory update + combat setup → now handled by LLM tools (create_memory, start_combat_setup)
+    # Only DM confirmation remains as fast-path above
+    return None
+
+
+def _removed_memory_and_combat_setup_block():
+    # Dummy function to hold removed code for git diff clarity
+    if False:
         if text in GLOBAL_EXIT_WORDS:
             if memory_task:
                 memory_task.status = "cancelled"
@@ -653,26 +661,77 @@ def resolve_dice_tool_question(
             "始终禁止 NPC 台词和剧情续写。禁止推进或编造剧情，禁止替真实 DM 决定结果。"
         )
     )
-    answer = strict_tool_output(chat_completion([
-        {
-            "role": "system",
-            "content": (
-                f"{role_instructions}"
-                "系统始终运行在 current_campaign 所指向的当前战役内，切换玩法不会切换或清空战役。"
-                "只能依据提供的战役上下文、机械数据和记忆回答。"
-                "战斗结算必须从 target_actor_cards 或 combat_participant_cards 读取目标 AC、HP、豁免和其他机械数值；"
-                "不得用聊天记录中的假设值替代实体角色卡。"
-                "战斗中声明攻击、施法或其他可能触发反应的行动时，先说明行动和所需投掷公式，"
-                "不要提前给出投掷结果；系统会先处理所有角色的反应决定。"
-                "只输出事实、数据、规则引用、计算结果、状态变更或必要的澄清问题。"
-                f"{output_instructions}"
-                f"{closing_instructions}"
-                "信息不足时只列出缺少的字段。"
-            ),
-        },
-        {"role": "system", "content": json.dumps(context, ensure_ascii=False, default=str)},
+    _sys1 = (
+        f"{role_instructions}"
+        "系统始终运行在 current_campaign 所指向的当前战役内，切换玩法不会切换或清空战役。"
+        "只能依据提供的战役上下文、机械数据和记忆回答。"
+        "战斗结算必须从 target_actor_cards 或 combat_participant_cards 读取目标 AC、HP、豁免和其他机械数值；"
+        "不得用聊天记录中的假设值替代实体角色卡。"
+        "战斗中声明攻击、施法或其他可能触发反应的行动时，先说明行动和所需投掷公式，"
+        "不要提前给出投掷结果；系统会先处理所有角色的反应决定。"
+        "只输出事实、数据、规则引用、计算结果、状态变更或必要的澄清问题。"
+        f"{output_instructions}"
+        f"{closing_instructions}"
+        "信息不足时只列出缺少的字段。"
+        "如果你需要执行操作（如创建角色、保存设定、查看绑定等），使用函数调用。"
+    )
+    _sys2 = json.dumps(context, ensure_ascii=False, default=str)
+    _msgs = [
+        {"role": "system", "content": _sys1},
+        {"role": "system", "content": _sys2},
         {"role": "user", "content": message},
-    ], temperature=0.2), campaign, combat_active, force_roleplay)
+    ]
+
+    # Try LLM function-calling tools; fall back to plain chat_completion if no tools triggered
+    _tools = tools_for_scope(campaign, is_dm=False)
+    _tool_used = False
+    try:
+        _resp = chat_completion(_msgs, temperature=0.2, tools=_tools)
+    except Exception:
+        _resp = None
+    if _resp is not None and not isinstance(_resp, str) and _resp.tool_calls:
+        _tool_used = True
+        for tc in _resp.tool_calls:
+            handler = TOOL_HANDLERS.get(tc.function.name)
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            args.setdefault("db", db)
+            args.setdefault("campaign", campaign)
+            if handler:
+                try:
+                    result = handler(**{k: v for k, v in args.items()
+                        if k in {"db", "campaign", "character_name", "class_name",
+                                  "level", "ancestry", "background", "abilities",
+                                  "category", "name", "description", "query",
+                                  "user_id", "player_name"}})
+                except Exception as exc:
+                    result = {"ok": False, "narration": f"工具执行失败: {exc}"}
+            else:
+                result = {"ok": False, "narration": f"未知工具: {tc.function.name}"}
+            _msgs.append({
+                "role": "assistant", "content": _resp.content,
+                "tool_calls": [{"id": tc.id, "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments}}],
+            })
+            _msgs.append({"role": "tool", "tool_call_id": tc.id,
+                "content": json.dumps(result, ensure_ascii=False, default=str)})
+        try:
+            _resp2 = chat_completion(_msgs, temperature=0.2, tools=_tools)
+            answer = (_resp2.content if _resp2 is not None and not isinstance(_resp2, str) else (_resp2 if isinstance(_resp2, str) else None))
+        except Exception:
+            answer = None
+        if answer:
+            answer = strict_tool_output(answer, campaign, combat_active, force_roleplay)
+
+    if not _tool_used:
+        if isinstance(_resp, str):
+            answer = strict_tool_output(_resp, campaign, combat_active, force_roleplay)
+        elif _resp is not None and _resp.content:
+            answer = strict_tool_output(_resp.content, campaign, combat_active, force_roleplay)
+        else:
+            answer = strict_tool_output(chat_completion(_msgs, temperature=0.2), campaign, combat_active, force_roleplay)
     if answer:
         roll_requested = bool(ROLL_REQUEST_RE.search(answer))
         requested_roll = ROLL_FORMULA_RE.search(answer) if roll_requested else None
@@ -711,11 +770,7 @@ def resolve_dice_assistant(
 ) -> dict:
     text = " ".join(message.strip().split())
     lowered = text.casefold()
-    if character and any(term in lowered for term in ("背包", "物品", "装备", "裝備", "inventory")):
-        inventory = character.data.get("inventory") or []
-        lines = [f"- {item.get('name', item.get('item_id', '未命名物品'))} × {item.get('quantity', 1)}" for item in inventory]
-        return _non_turn_result(_result(f"骰娘：{character.character_name} 的物品：\n" + ("\n".join(lines) if lines else "（空）")))
-
+    # Inventory/potion/HP change → handled by LLM tools now
     is_question = any(term in lowered for term in (
         "什么", "多少", "怎么", "如何", "能否", "是否", "应该", "可以吗", "吗", "？", "?",
         "what", "how", "which",
@@ -724,55 +779,13 @@ def resolve_dice_assistant(
     if is_question and not has_explicit_dice_formula:
         return _non_turn_result(resolve_dice_tool_question(db, campaign, character, message, narrative_mode))
 
-    if character and any(term in lowered for term in ("治疗药水", "治療藥水", "healing potion", "potion of healing")):
-        inventory = character.data.get("inventory") or []
-        potion = next((item for item in inventory if item.get("item_id") == "potion_healing" and item.get("quantity", 0) > 0), None)
-        if not potion:
-            return _result(f"骰娘：{character.character_name} 没有可用的治疗药水。")
-        roll = roll_dice("2d4+2")
-        combat = character.data.get("combat") or {}
-        before = int(combat.get("current_hp", 0))
-        maximum = int(combat.get("max_hp", before))
-        after = min(maximum, before + roll["total"])
-        next_inventory = copy.deepcopy(inventory)
-        next(item for item in next_inventory if item.get("item_id") == "potion_healing")["quantity"] -= 1
-        update_character(
-            db, character, {"combat": {"current_hp": after}, "inventory": next_inventory},
-            "dice assistant consumed Potion of Healing", "consume_item", ["potion_healing"],
-        )
-        changes = [
-            {"type": "hp_change", "character_id": character.id, "before": before, "after": after},
-            {"type": "inventory_change", "character_id": character.id, "item_id": "potion_healing", "delta": -1},
-        ]
-        return _result(f"骰娘：治疗药水恢复 {roll['total']} 点，{character.character_name} HP {before}/{maximum} → {after}/{maximum}。", [roll], changes)
-
+    # Direct dice formula → fast-path atomic roll (keep)
     formula = re.search(r"(?<!\w)(\d*d\d+(?:[+-]\d+)?)(?!\w)", lowered)
     if formula:
         roll = roll_dice(formula.group(1))
         return _result(f"骰娘：{roll['formula']} = {roll['total']}（{roll['rolls']}，修正 {roll['modifier']:+d}）", [roll])
 
-    hp_change = re.search(r"(?:伤害|傷害|damage)\s*(\d+)", lowered)
-    healing = re.search(r"(?:治疗|治療|heal)\s*(\d+)", lowered)
-    if (hp_change or healing) and character:
-        combat = character.data.get("combat") or {}
-        before = int(combat.get("current_hp", 0))
-        maximum = int(combat.get("max_hp", before))
-        delta = int((healing or hp_change).group(1)) * (1 if healing else -1)
-        after = max(0, min(maximum, before + delta))
-        update_character(db, character, {"combat": {"current_hp": after}}, text, "dice_assistant_hp")
-        change = {"type": "hp_change", "character_id": character.id, "before": before, "after": after}
-        concentration = resolve_concentration_damage(db, campaign, character, abs(delta)) if hp_change else None
-        narration = f"骰娘：{character.character_name} HP {before}/{maximum} → {after}/{maximum}。"
-        rolls = []
-        if concentration:
-            rolls.append(concentration["roll"])
-            narration += (
-                f"\n专注豁免 DC {concentration['dc']}：{concentration['roll']['total']}，"
-                + ("专注维持。" if concentration["success"] else "专注中断。")
-            )
-            change["concentration"] = concentration
-        return _result(narration, rolls=rolls, changes=[change])
-
+    # Skill/save/initiative checks → fast-path (keep: core dice mechanic)
     if any(term in lowered for term in ("检定", "檢定", "豁免", "check", "save", "先攻", "initiative")):
         combat_active = bool(((campaign.config or {}).get("turn_state") or {}).get("combat"))
         label, modifier = _modifier(character, lowered, combat_active)

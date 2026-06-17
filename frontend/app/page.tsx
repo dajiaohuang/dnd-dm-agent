@@ -122,6 +122,19 @@ export default function Home() {
     try {
       let message = text;
       if (files.length) {
+        const allowedExts = [".pdf", ".docx", ".doc", ".txt", ".md", ".json", ".csv", ".tsv",
+          ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".xlsx", ".xlsm", ".pptx", ".html", ".htm",
+          ".zip", ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mov", ".mkv", ".avi", ".webm"];
+        const maxBytes = 20 * 1024 * 1024; // 20 MB
+        let totalSize = 0;
+        for (const file of files) {
+          const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
+          if (!allowedExts.includes(ext)) {
+            throw new Error(`不支持的文件类型: ${file.name}`);
+          }
+          totalSize += file.size;
+        }
+        if (totalSize > maxBytes) throw new Error("附件总大小超过 20MB 限制");
         const form = new FormData();
         files.forEach((file) => form.append("files", file));
         const parsed = await call("/parse/files", { method: "POST", body: form });
