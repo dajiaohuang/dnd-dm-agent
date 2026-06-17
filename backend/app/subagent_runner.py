@@ -43,8 +43,8 @@ def run_subagent_task(task_id: str) -> None:
                 result = complete_character_sheet(db, campaign, proposal_data)
             elif role == "npc_batch_worker":
                 result = generate_npc_batch(db, campaign, proposal_data)
-            elif role == "campaign_setting_writer":
-                result = generate_campaign_setting(db, campaign, proposal_data)
+            elif role == "content_writer":
+                result = generate_content(db, campaign, proposal_data)
             elif role == "campaign_compressor":
                 result = compress_campaign_events(db, campaign, proposal_data)
             else:
@@ -285,48 +285,107 @@ def generate_npc_batch(db, campaign: Campaign, proposal_data: dict[str, Any]) ->
     }
 
 
-def generate_campaign_setting(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
-    """Background subagent: generate campaign setting (location/faction/item/event) via LLM."""
+def generate_content(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
+    """Unified content writer subagent — dispatches by content type."""
     proposal = proposal_data.get("proposal") or {}
-    category = str(proposal.get("category", "location"))
-    theme = str(proposal.get("theme") or campaign.name or "fantasy")
+    ctype = str(proposal.get("type", "npc"))
+    theme = str(proposal.get("theme") or campaign.name or "")
     count = int(proposal.get("count", 1))
-
-    cat_descriptions = {
-        "location": "a location with name, geography, key NPCs, history, secrets",
-        "faction": "a faction with name, leader, goals, members, rivals, secrets",
-        "item": "a magic item with name, type, rarity, attunement, powers",
-        "event": "a campaign event with name, timeline, key NPCs involved, consequences",
-    }
-    cat_desc = cat_descriptions.get(category, cat_descriptions["location"])
+    prompt = str(proposal.get("prompt") or "")
 
     import json as _j
+
+    # ── NPC batch ──
+    if ctype == "npc":
+        batch_start = int(proposal.get("batch_start", 0))
+        batch_size = int(proposal.get("batch_size", 6))
+        total_count = int(proposal.get("total_count", batch_size))
+        llm_result = chat_completion([{
+            "role": "system", "content": (
+                f"Generate {batch_size} unique NPCs for a {theme} setting. Each needs: "
+                f"name, occupation, ancestry, age, alignment, personality (1 sentence), "
+                f"appearance (1 sentence), secret (1 sentence). "
+                f"Return ONLY a JSON array with keys: name, occupation, ancestry, age, alignment, personality, appearance, secret."
+            ),
+        }, {"role": "user", "content": f"NPCs {batch_start+1}-{batch_start+batch_size} of {total_count}"}],
+            temperature=0.8)
+        try:
+            npcs = _j.loads(llm_result or "[]")
+        except Exception:
+            npcs = []
+        from app.campaign_editor import create_draft as _cd, publish_drafts as _pd, setting_to_npc_character as _s2c, list_settings as _ls
+        for npc in npcs:
+            _cd(db, campaign.id, "create", proposal={
+                "category": "npc", "name": npc.get("name", "?"),
+                "description": (
+                    f"职业: {npc.get('occupation','?')} | 种族: {npc.get('ancestry','?')} | "
+                    f"阵营: {npc.get('alignment','?')}\n性格: {npc.get('personality','?')}\n"
+                    f"外貌: {npc.get('appearance','?')}\n秘密: {npc.get('secret','?')}"
+                ),
+            })
+        published = _pd(db, campaign.id)
+        card_names = []
+        if proposal.get("create_cards"):
+            for s in _ls(db, campaign.id):
+                if s.category == "npc":
+                    ch = _s2c(db, s)
+                    if ch: card_names.append(ch.character_name)
+        return {
+            "kind": "content_generated", "type": "npc",
+            "batch": f"{batch_start+1}-{min(batch_start+batch_size, total_count)}",
+            "settings": len(published), "cards": len(card_names),
+        }
+
+    # ── Settings (location/faction/item/event) ──
+    if ctype in {"location", "faction", "item", "event"}:
+        cat_desc = {
+            "location": "a location with geography, key NPCs, history, secrets",
+            "faction": "a faction with leader, goals, members, rivals, secrets",
+            "item": "a magic item with type, rarity, attunement, powers",
+            "event": "a campaign event with timeline, key NPCs, consequences",
+        }.get(ctype, "a detailed setting")
+        llm_result = chat_completion([{
+            "role": "system", "content": (
+                f"Generate {count} {ctype} setting(s) for a {theme} campaign. "
+                f"Each: {cat_desc}. Return ONLY a JSON array with keys: name, description."
+            ),
+        }, {"role": "user", "content": prompt or f"Generate {count} {ctype} for {theme}"}],
+            temperature=0.8)
+        try:
+            items = _j.loads(llm_result or "[]")
+        except Exception:
+            items = [{"name": f"{theme} {ctype}", "description": "Generated."}]
+        from app.campaign_editor import create_draft as _cd2, publish_drafts as _pd2
+        for item in items:
+            _cd2(db, campaign.id, "create", proposal={
+                "category": ctype, "name": item.get("name", "?"),
+                "description": item.get("description", ""),
+            })
+        published = _pd2(db, campaign.id)
+        return {"kind": "content_generated", "type": ctype, "count": len(published),
+                "names": [s.name for s in published]}
+
+    # ── Quest/encounter/loot/rumor/recap/prep (pure text output) ──
+    type_guides = {
+        "quest": "a multi-step quest with objectives, rewards, and NPCs involved",
+        "encounter": "a combat encounter with CR, terrain, monsters, tactics, loot",
+        "loot": "a treasure hoard with magic items, gold, and descriptions",
+        "rumor": "a list of rumors NPCs might share about the area",
+        "recap": "a session recap in narrative form (past tense, summary style)",
+        "prep": "a DM session prep covering opening scene, key scenes, NPC timing, transitions",
+    }
+    guide = type_guides.get(ctype, "well-structured content")
     llm_result = chat_completion([{
         "role": "system", "content": (
-            f"You are a D&D 5E worldbuilder. Generate {count} {category} setting(s) "
-            f"for a {theme} campaign. Each should be {cat_desc}. "
-            f"Return ONLY a JSON array of objects with keys: name, description."
+            f"You are a D&D 5E DM assistant. Generate {count} {ctype}(s) "
+            f"for a {theme} campaign. {guide}. "
+            f"Return ONLY the generated content in markdown format."
         ),
-    }, {"role": "user", "content": f"Generate {count} {category} setting(s) for {theme}."}],
+    }, {"role": "user", "content": prompt or f"Generate {count} {ctype} for {theme}"}],
         temperature=0.8)
-
-    try:
-        items = _j.loads(llm_result or "[]")
-    except Exception:
-        items = [{"name": f"{theme} {category}", "description": "Generated setting."}]
-
-    from app.campaign_editor import create_draft, publish_drafts
-    for item in items:
-        create_draft(db, campaign.id, "create", proposal={
-            "category": category, "name": item.get("name", "?"),
-            "description": item.get("description", ""),
-        })
-    published = publish_drafts(db, campaign.id)
     return {
-        "kind": "campaign_setting_written",
-        "category": category,
-        "count": len(published),
-        "names": [s.name for s in published],
+        "kind": "content_generated", "type": ctype,
+        "content": llm_result or "生成失败。",
     }
 
 
