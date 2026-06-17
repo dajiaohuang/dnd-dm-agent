@@ -84,12 +84,6 @@ EXPLICIT_COMMANDS = {
     "/exportcharacter": "export_character_sheet",
 }
 
-# NATURAL_COMMANDS removed — LLM function-calling handles natural language now.
-# Only exact /slash commands use EXPLICIT_COMMANDS as a fast path.
-
-NATURAL_COMMANDS: dict[str, str] = {}
-
-
 def route_command(message: str) -> Command | None:
     """Return a Command only for exact /slash matches (fast-path bypass of LLM)."""
     text = " ".join(message.strip().split())

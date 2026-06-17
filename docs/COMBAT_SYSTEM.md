@@ -2,218 +2,169 @@
 
 # Combat System
 
-This document describes combat behavior in both **DM Mode** and **Dice Assistant Mode**, including turn flow, QQ bindings, hosted characters, reactions, and state updates.
+## Two Combat Modes
 
-## Shared Combat Core
+| | System-Managed | Dice Free Combat |
+|---|---|---|
+| Manager | System | Human DM |
+| Entry | `/进入战斗` (after DM confirms) | Natural occurrence |
+| Initiative | System rolls + sorts | Human DM manages |
+| Turn advance | `end_turn` tool | Never auto-advances |
+| Action quotas | ✅ Tracked | ♾️ Unlimited |
+| Typical use | Automated combat | Human table @bot assists |
 
-DM Mode and Dice Assistant Mode use the same deterministic combat pipeline. The mode changes who narrates and who has authority over NPCs, not the underlying mechanics.
+### Dice Free Combat (default)
 
-Shared rules:
+Human DM runs combat; players freely @bot in chat for actions.
+The dice assistant only: reads hot data → rolls → resolves → writes back.
 
-- Combat uses entity character sheets only. AC, HP, modifiers, saves, initiative, spellcasting values, inventory, and active effects must come from structured character data.
-- Combat begins by confirming participants. Characters without entity sheets cannot join initiative.
-- The system rolls initiative for every participating player character, NPC, and monster.
-- Combat enters turn-based mode and records round, turn index, participants, initiative, and reaction availability in campaign state.
-- A turn normally advances only after the action is resolved, reactions are complete, and state changes have been audited.
-- Ending combat clears combat turn state and returns the campaign to free-play mode.
+```
+@bot "Roll initiative for Aric, Goblin, Mira"
+  → Manually roll each → output list
 
-## Character Cards and Effective Values
+@bot "I attack the goblin with my longsword"
+  → combat_attack → checked_roll → "Hit for 8"
 
-Each combat action receives:
+@bot "Wait, that damage was wrong"
+  → undo_damage → CharacterChange reversal → HP restored
 
-- the acting character sheet, if known;
-- cropped mechanical cards for all combat participants;
-- focused target cards when the message names a target;
-- relevant rules, spells, effects, memories, and public campaign facts.
-
-Base character data is not overwritten by temporary combat effects. Equipment, buffs, debuffs, spells, custom items, and other temporary modifiers contribute to an `effective` mechanical snapshot.
-
-The effective snapshot may affect:
-
-- AC and HP-related values;
-- ability modifiers;
-- saves and skill checks;
-- initiative;
-- attack and spellcasting values;
-- advantage or disadvantage;
-- bonus dice;
-- concentration checks;
-- consumable one-shot effects.
-
-## DM Mode Combat
-
-DM Mode is the full AI Dungeon Master mode. In combat it uses the same mechanical engine as Dice Assistant Mode, but it may add narration, portray NPCs, and present established story context.
-
-DM Mode may:
-
-- describe combat scenes and outcomes;
-- portray present NPCs and monsters;
-- use NPC roleplay profiles, secrets, motives, combat behavior, and planned actions;
-- connect combat to established campaign memory and current scene facts;
-- operate NPCs and monsters during their turns;
-- resolve mechanical actions with deterministic rolls and structured state changes.
-
-DM Mode must still:
-
-- read target AC, HP, saves, and modifiers from entity cards;
-- avoid inventing mechanical values;
-- wait for reaction decisions before rolling when a reaction window is opened;
-- log rolls, state changes, and combat events.
-
-## Dice Assistant Mode Combat
-
-Dice Assistant Mode supports real players and a real DM. It does not run the story by itself. It keeps the campaign framework, character cards, memory, effects, inventory, and combat tools, but disables proactive plot advancement and NPC portrayal.
-
-Dice Assistant Mode may:
-
-- host initiative and turn order;
-- calculate checks, saves, attacks, damage, healing, and effects;
-- answer mechanical questions about character sheets, spells, rules, items, and combat state;
-- update HP, inventory, effects, and memory when explicitly instructed;
-- mention the QQ user who controls the current character;
-- ask the DM to decide NPC and monster actions or reactions.
-
-Dice Assistant Mode must not:
-
-- narrate scenes or outcomes as the DM;
-- portray NPCs or monsters unless a character is explicitly marked as hosted;
-- suggest player tactics by default;
-- advance plot or decide story consequences;
-- treat NPCs or monsters as automatically controlled merely because they are NPCs or monsters.
-
-## QQ Bindings
-
-QQ bindings are campaign-specific. Switching the active campaign changes the active character bindings.
-
-Binding rules:
-
-- One QQ user may be bound to multiple characters in the same campaign.
-- One character may also mirror multiple QQ user IDs in its `integrations.qq_user_ids`.
-- In combat, when a QQ user controls multiple characters, the router prefers the character whose turn is currently active.
-- Outside combat, if the QQ user controls multiple characters, the message can select a character by naming it. If no clear character is selected, the system avoids guessing.
-- Deleting a character removes its QQ bindings.
-- Switching out of Dice Assistant Mode removes only Dice Assistant managed DM bindings for NPCs and monsters.
-
-## NPC and Monster Bindings in Dice Assistant Mode
-
-Dice Assistant Mode binds NPCs and monsters to the DM QQ user so the real DM can operate them.
-
-When entering Dice Assistant Mode:
-
-- the system uses `campaign.config.dice_dm_qq_user_id` if present;
-- otherwise, if exactly one DM QQ is configured in settings, it uses that;
-- otherwise, it asks who the DM is;
-- once the DM QQ is known, all NPCs and monsters in the campaign are bound to that QQ as Dice Assistant managed bindings.
-
-When exiting Dice Assistant Mode:
-
-- Dice Assistant managed NPC and monster bindings are removed;
-- normal player bindings remain intact.
-
-If the DM QQ changes:
-
-- stale Dice Assistant managed bindings for the old DM are removed;
-- NPCs and monsters are rebound to the new DM QQ.
-
-On service startup:
-
-- existing databases are migrated to support one QQ controlling multiple characters;
-- active Dice Assistant campaigns resync NPC and monster bindings to the configured DM QQ.
-
-## Hosted Characters
-
-In Dice Assistant Mode, no character is hosted by default. NPCs and monsters are not naturally hosted.
-
-A character is treated as hosted only when its character data explicitly sets:
-
-```json
-{
-  "control": "hosted"
-}
+@bot "I drink a healing potion"
+  → apply_healing → HP + 2d4+2
 ```
 
-or:
+The dice assistant senses turn order from conversation history,
+flags inconsistencies, and asks whether to roll initiative.
+System-managed combat requires explicit DM confirmation before activating.
 
-```json
-{
-  "control": "auto"
-}
+### System-Managed Turn-Based Combat
+
+The system manages initiative, turns, and action quotas.
+
+**Startup flow:**
+
+```
+DM: /进入战斗 or "enter combat"
+Assistant: "Preparing to enter. Confirm:
+            1. Which characters join?
+            2. Any advantage/disadvantage on initiative?"
+DM: "Aric, Goblin, Mira. Aric has advantage."
+Assistant: Rolls all initiative → sorts → enters turn_based mode
 ```
 
-Hosted character behavior:
+## Turn Action Quotas
 
-- if a hosted character is the current combat actor, its action may include brief roleplay prose even when combat roleplay is disabled;
-- the roleplay must be based on that character's own `roleplay` and `story_role` fields;
-- the prose is limited to that action's gesture, voice, combat behavior, or immediate reaction;
-- it must not advance plot, portray other NPCs, or decide story consequences.
+Each turn tracks remaining quotas; turns never auto-advance:
 
-## Turn Access
+```
+Kalen (Fighter Lv5) → quota: main 1, bonus 1, reaction 1, move 30
 
-Turn access is enforced by mode and current actor.
+"Attack goblin with longsword"
+  → combat_attack → main: 1→0
+  → "Hit 8. Remaining: bonus 1, move 30"
 
-DM Mode:
+"Action Surge"
+  → use_feature("action_surge") → extra: 0→1
+  → "Action Surge! Remaining: main 1, bonus 1, move 30"
 
-- player characters act on their own turns;
-- NPCs and monsters are operated by the DM;
-- DM combat output may include narration and roleplay.
+"Attack orc"
+  → combat_attack → extra: 1→0
+  → "Hit 12. Remaining: bonus 1, move 30"
 
-Dice Assistant Mode:
+"Off-hand shortsword on goblin"
+  → combat_attack(use_bonus_action=True) → bonus: 1→0
+  → "Hit 4. Remaining: move 30"
 
-- player characters act through their bound QQ users;
-- NPCs and monsters are operated by the DM QQ through their Dice Assistant bindings;
-- if one QQ controls multiple characters, the current turn selects the relevant character;
-- non-turn messages such as status checks, combat exit, and mode commands can interrupt pending setup or reaction prompts when allowed.
+"End turn"
+  → end_turn → advance_turn → "Goblin's turn"
+```
 
-## Reactions
+### Quota Types
 
-Potential reaction triggers open a reaction window before dice results are shown.
+| main_action | Attack, Cast Spell, Dash, Disengage, Dodge, Ability Check |
+| bonus_action | Off-hand attack, Cunning Action, Second Wind, Rage |
+| extra_actions | Gained via Action Surge |
+| reaction | Opportunity Attack, Shield (usable off-turn) |
+| movement | Feet remaining |
 
-Reaction flow:
+### Clarification Flow
 
-1. The acting character declares an action.
-2. The system identifies possible reactors from participant cards and reaction features.
-3. The system shows the action declaration and required roll formula, but does not roll yet.
-4. Bound QQ users are mentioned and asked whether they react.
-5. In Dice Assistant Mode, NPC and monster reactions go to the bound DM QQ unless the character is explicitly hosted.
-6. Explicitly hosted characters may decide automatically.
-7. After every reaction is decided, the system performs the roll, resolves the action, applies state changes, and advances the turn.
+The LLM never guesses intent — it asks when information is insufficient:
 
-## Roleplay and Advice Switches
+```
+"I cast a spell at him"
+  → LLM: "Which spell? You have Magic Missile (1st) and Fireball (3rd)"
 
-Combat roleplay and advice are configurable per play style.
+"Fireball"
+  → LLM: "What level? You have 1x 3rd and 2x 4th slots"
 
-Defaults:
+"3rd level"
+  → LLM: "Which targets?"
 
-- DM Mode: combat roleplay on, combat advice on.
-- Dice Assistant Mode: combat roleplay off, combat advice off.
+"The orc and the goblin"
+  → combat_cast_spell(spell="Fireball", level=3, targets=["orc","goblin"], save_type="dex")
+  → main: 1→0, spell_slots[3]: 1→0
+  → "Fireball DC 15. Damage 8d6 = 32"
+```
 
-Commands:
+## Combat Tools
 
-- `/combatroleplayon`
-- `/combatroleplayoff`
-- `/combatadviceon`
-- `/combatadviceoff`
+### Action Tools
 
-Important boundaries:
+| Tool | Cost | Auto-resolves |
+|------|------|---------------|
+| `combat_attack` | main/bonus/extra | d20+bonus → attack roll; damage dice |
+| `combat_cast_spell` | main/bonus/extra | Spell DC/attack + saves |
+| `combat_ability_check` | main | d20+mod (shove/grapple) |
+| `combat_dash` | main | Double speed |
+| `combat_disengage` | main | No opportunity attacks |
+| `combat_dodge` | main | Attacks at disadvantage, DEX saves advantage |
+| `use_feature` | varies | Action Surge/Second Wind/Rage |
+| `end_turn` | — | Advance to next |
+| `turn_status` | — | Query remaining |
 
-- Dice Assistant non-combat output is always tool-only; combat roleplay and advice switches do not affect non-combat behavior.
-- Hosted character action prose bypasses the combat roleplay switch only for that hosted character's own action.
-- Advice remains controlled separately from roleplay.
+### Check Tools
 
-## State Updates and Audit
+| Tool | Description |
+|------|-------------|
+| `ability_check` | Ability/skill check (reads HotSnapshot) |
+| `saving_throw` | Saving throw vs DC |
+| `apply_damage` | Deal damage → write HP |
+| `apply_healing` | Heal → write HP |
+| `apply_condition` | Add condition |
+| `remove_condition` | Remove condition |
+| `undo_damage` | Undo last damage (CharacterChange reversal) |
+| `undo_healing` | Undo last heal |
+| `recent_changes` | HP change history |
 
-Combat updates are persisted and auditable.
+## Hot Data Layer
 
-The system records:
+Every combat action reads `get_hot_character()` for a live HotSnapshot:
 
-- dice rolls and formulas;
-- HP changes;
-- inventory changes;
-- active effect changes;
-- concentration checks;
-- reaction decisions;
-- turn advancement;
-- character version changes;
-- campaign events and memory extraction candidates.
+```
+base character data (characters table)
+  + active_effects (buffs/debuffs/equipment/spell effects)
+  = HotSnapshot {
+      abilities: {str: {score:18, mod:+4}, ...}
+      armor_class: 18, current_hp: 28, max_hp: 28
+      saving_throws: {str: +7, dex: +2, ...}
+      skills: {athletics: {bonus: +7}, ...}
+      attacks: [{name:"Longsword", bonus:+7, damage:"1d8+4"}]
+      spell_dc: 15, spell_attack_bonus: 7
+      conditions: ["poisoned"]
+    }
+```
 
-This lets later questions such as "what happened last round?", "why did AC change?", or "which effect was consumed?" be answered from stored state instead of chat history alone.
+All rolls go through `checked_roll()`: `random.randint()` + `DiceAuditLog`.
+HP changes write to `CharacterChange` (before/after snapshots), enabling exact undo.
+
+## DM Mode vs Dice Assistant
+
+Both share the same combat pipeline; only output style differs:
+
+| | DM Combat | Dice Combat |
+|---|-----------|-------------|
+| Output | Mechanical data → LLM narrative | Pure mechanical data |
+| Roleplay | ✅ NPC dialogue, scene description | ❌ `strict_tool_output` filters |
+| Advice | ✅ Tactical advice (default) | ❌ Prohibited (default) |
+| Temperature | 0.7 | 0.2 |
+| Code path | `resolve_chat(mode="dm")` | `resolve_chat(mode="dice")` |

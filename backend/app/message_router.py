@@ -23,7 +23,6 @@ from app.task_sessions import format_ready_reviews, ready_reviews, task_scope
 from app.llm_loop import execute_llm_with_tools
 
 
-GLOBAL_INTERRUPT_WORDS = {"退出", "取消", "结束", "停止", "算了"}
 GLOBAL_SAFE_COMMANDS = {
     "help", "status", "save", "pause", "resume",
     "cancel_character_build", "exit_dice_assistant", "end_combat", "exit_turn_mode",
