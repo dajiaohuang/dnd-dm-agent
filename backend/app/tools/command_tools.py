@@ -969,6 +969,7 @@ def handle_cancel_character_draft(
 def handle_create_setting_draft(
     db: Session, campaign: Campaign,
     category: str = "", name: str = "", description: str = "",
+    user_id: str = "",  # for ownership tracking
     **_kw: Any,
 ) -> dict:
     """Create a campaign setting draft."""
@@ -979,6 +980,7 @@ def handle_create_setting_draft(
     draft = create_draft(
         db, campaign.id, "create",
         proposal={"category": category, "name": name.strip(), "description": description or ""},
+        actor_id=user_id or None,
     )
     db.commit()
     return _ok(
@@ -1003,7 +1005,7 @@ def handle_show_setting_drafts(
         return _ok("当前没有待发布的设定草稿。")
     lines = [f"=== 设定草稿（{len(drafts)}）==="]
     for d in drafts:
-        lines.append(f"  [{d.category}] {d.name}: {d.proposal_data.get('description', '')[:80]}")
+        lines.append(f"  [{d.category}] {d.name}: {(d.proposal or {}).get('description', '')[:80]}")
     return _ok("\n".join(lines), draft_count=len(drafts))
 
 
