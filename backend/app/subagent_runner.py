@@ -39,7 +39,7 @@ def run_subagent_task(task_id: str) -> None:
                 result = review_campaign_setting_drafts(db, campaign, proposal_data)
             elif role == "character_sheet_reviewer":
                 result = review_character_sheet(db, campaign, proposal_data)
-            elif role == "character_completer":
+            elif role == "character_sheet_completer":
                 result = complete_character_sheet(db, campaign, proposal_data)
             elif role == "npc_batch_worker":
                 result = generate_npc_batch(db, campaign, proposal_data)

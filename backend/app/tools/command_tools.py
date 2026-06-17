@@ -1136,7 +1136,7 @@ def handle_complete_character_sheet(
         id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
         platform="system", chat_id=None, owner_user_id=None, session_id=None,
         status="queued", priority=2, draft_data={},
-        proposal_data={"agent_role": "character_completer",
+        proposal_data={"agent_role": "character_sheet_completer",
                        "proposal": {"character_id": character.id}},
         missing_fields=[], next_prompt=f"补全{character_name}的角色卡。",
     )
