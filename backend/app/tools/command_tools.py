@@ -1381,6 +1381,55 @@ def handle_export_and_send(
                file_path=str(target), character_name=character_name)
 
 
+
+def handle_resolve_pending_option(
+    db: Session, campaign: Campaign, option_number: int = 0, **_kw: Any,
+) -> dict:
+    """Execute a pending menu option by number."""
+    pending = (campaign.config or {}).get("pending") or {}
+    options = pending.get("options") or []
+    if option_number < 1 or option_number > len(options):
+        return _err(f"选项编号 1-{len(options)}")
+    opt = options[option_number - 1]
+    action = opt.get("action", "")
+
+    if action == "create_campaign":
+        cs = pending.get("campaign_setting") or {}
+        name = cs.get("name", "新战役")
+        desc = cs.get("description", "")
+        from app.commands import Command
+        from app.campaign_control import execute_command
+        # Inject name into campaign config
+        cfg = copy.deepcopy(campaign.config or {})
+        cfg["pending_generated_campaign_name"] = name
+        cfg["pending_generated_campaign_description"] = desc
+        cfg.pop("pending", None)
+        campaign.config = cfg; db.commit()
+        return execute_command(db, Command("create_campaign_from_prompt"), campaign, None, None, True, None)
+    elif action == "regenerate":
+        # Clear pending setting so next generate creates fresh
+        cfg = copy.deepcopy(campaign.config or {})
+        p = cfg.get("pending") or {}
+        p.pop("campaign_setting", None)
+        p.pop("options", None)
+        cfg["pending"] = p
+        campaign.config = cfg; db.commit()
+        return _ok("已清除上一个设定。请重新描述你想要的战役。")
+    elif action == "confirm_dm":
+        cfg = copy.deepcopy(campaign.config or {})
+        p = cfg.get("pending") or {}
+        p["dm_user_id"] = opt.get("user_id", "")
+        cfg["pending"] = p
+        campaign.config = cfg; db.commit()
+        return _ok("已确认DM身份。")
+    elif action == "enter_dm":
+        from app.commands import Command
+        from app.campaign_control import execute_command
+        return execute_command(db, Command("enter_campaign_mode"), campaign, None, None, True, None)
+    else:
+        return _err(f"未知操作: {action}")
+
+
 def handle_switch_campaign(
     db: Session, campaign: Campaign,
     campaign_name: str = "", **_kw: Any,
@@ -1468,6 +1517,7 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "exit_to_lobby": handle_exit_to_lobby,
     "switch_campaign": handle_switch_campaign,
     "read_attachment": handle_read_attachment,
+    "resolve_pending_option": handle_resolve_pending_option,
     "complete_character_sheet": handle_complete_character_sheet,
     "execute_plan": handle_execute_plan,
     "generate_cards_from_settings": handle_generate_cards_from_settings,
@@ -1542,7 +1592,7 @@ def tools_for_scope(campaign: Campaign, is_dm: bool, message: str = "") -> list[
     if style == "lobby":
         if campaign is None:
             # No campaign at all → only creation and search tools
-            allowed = {"create_campaign_from_prompt", "spell_search"}
+            allowed = {"create_campaign_from_prompt", "spell_search", "resolve_pending_option"}
         else:
             allowed = lobby_tools
     if style == "dice_assistant":
