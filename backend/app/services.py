@@ -404,10 +404,20 @@ def resolve_chat(db: Session, campaign_id: str | None, session_id: str | None, c
             if campaign else
             "（选战役后才可车卡和改设定）\n"
         )
+        _attachments = (campaign.config or {}).get("last_attachments") or [] if campaign else []
+        _att_info = ""
+        if _attachments:
+            _att_info = f"\n━━━ 最近附件 ━━━\n收到 {len(_attachments)} 个文件。"
+            for i, a in enumerate(_attachments):
+                meta = a.get("meta", {})
+                ctype = "人物卡" if (isinstance(meta, dict) and "character_data" in meta) else "文档"
+                _att_info += f"\n  [{i+1}] {ctype} ({a.get('parser','?')})"
+            _att_info += "\n用户说「用刚才发的文件开卡」时，调用 read_attachment 读取。\n"
         _sys = (
             "你是 D&D 5E 跑团管理助手。当前处于「游戏外模式」——不在游戏中。\n"
             "你的职责：管理战役、创建角色卡、编辑设定。\n"
             "用户可以说「进入DM」或「进入骰娘」开始游戏。\n"
+            f"{_att_info}"
             "\n━━━ 当前战役 ━━━\n"
             f"{_campaign_info}\n"
             "━━━ 可用操作 ━━━\n"

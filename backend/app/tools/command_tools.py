@@ -531,6 +531,20 @@ COMMAND_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "read_attachment",
+            "description": "读取用户最近上传的附件内容（支持 xlsx/pdf/docx/md/txt）。用户说「用刚才发的文件」「读那个文件」「打开那个文件」时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer", "description": "附件索引: 0=最近, 1=上一个, 默认为0", "default": 0},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "spell_search",
             "description": "搜索 D&D 5E 法术",
             "parameters": {
@@ -1082,6 +1096,35 @@ def handle_exit_to_lobby(
     db.commit()
     return _ok(f"已返回大厅。当前战役: {campaign.name}。\n发送 /进入DM 或 /进入骰娘 开始游戏。")
 
+def handle_read_attachment(
+    db: Session, campaign: Campaign,
+    index: int = 0, **_kw: Any,
+) -> dict:
+    """Read a stored attachment from campaign config."""
+    stored = (campaign.config or {}).get("last_attachments") or []
+    if not stored:
+        return _err("最近没有收到附件。请先发送文件。")
+    if index >= len(stored):
+        return _err(f"只有 {len(stored)} 个最近附件，索引 {index} 超出范围。")
+    item = stored[index]
+    parser = item.get("parser", "unknown")
+    meta = item.get("meta", {})
+    content = item.get("content", "")
+    summary = f"[附件 #{index+1}] 解析器: {parser}\n"
+    if meta:
+        if isinstance(meta, dict) and "character_data" in meta:
+            import json as _json_r
+            summary += "类型: 人物卡\n"
+            summary += f"内容:\n{_json_r.dumps(meta['character_data'], ensure_ascii=False, indent=2)}"
+        else:
+            summary += f"元数据: {meta}\n"
+    if content and not (isinstance(meta, dict) and "character_data" in meta):
+        summary += f"内容: {content[:2000]}"
+    return _ok(summary, attachment_index=index, parser=parser,
+               has_character_data=bool(isinstance(meta, dict) and "character_data" in meta),
+               turn_consuming=False)
+
+
 def handle_switch_campaign(
     db: Session, campaign: Campaign,
     campaign_name: str = "", **_kw: Any,
@@ -1167,6 +1210,7 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "enter_campaign_mode": handle_enter_campaign_mode,
     "exit_to_lobby": handle_exit_to_lobby,
     "switch_campaign": handle_switch_campaign,
+    "read_attachment": handle_read_attachment,
     # Delegated to execute_command
     **_DELEGATED_HANDLERS,
 }

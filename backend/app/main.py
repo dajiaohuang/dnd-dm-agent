@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import copy
 import logging
 import shutil
 from pathlib import Path
@@ -167,10 +168,7 @@ async def napcat_callback(
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
 
-    attachment_context = (parsed or {}).get("content", "")
-    if attachment_context:
-        text = f"{text}\n\n玩家同时发送了以下附件内容：\n{attachment_context}".strip()
-    if not text:
+    if not text and not parsed:
         return {"ok": True, "ignored": "empty_message", "attachment_errors": attachment_errors}
 
     campaign = adapter.default_campaign(db)
@@ -186,6 +184,32 @@ async def napcat_callback(
         db.commit()
         db.refresh(campaign)
         set_active_napcat_campaign(db, campaign)
+
+    # ── 持久化最近附件 + 注入上下文 ──
+    attachment_context = (parsed or {}).get("content", "")
+    if attachment_context:
+        text = f"{text}\n\n玩家同时发送了以下附件内容：\n{attachment_context}".strip()
+    elif parsed and not text:
+        # File-only message: store and prompt
+        _stored = {"content": ((parsed or {}).get("content") or "")[:8000],
+                    "meta": (parsed or {}).get("meta") or {},
+                    "parser": (parsed or {}).get("parser") or ""}
+        cfg = copy.deepcopy(campaign.config or {})
+        recent = list(cfg.get("last_attachments") or [])
+        recent.insert(0, _stored)
+        cfg["last_attachments"] = recent[:5]
+        campaign.config = cfg; db.commit()
+        return {"reply": "文件已收到。请告诉我你想用它做什么？例如：用这个文件的人物卡开卡。", "auto_escape": False, "at_sender": False}
+    if parsed:
+        _stored = {"content": attachment_context[:8000],
+                    "meta": (parsed or {}).get("meta") or {},
+                    "parser": (parsed or {}).get("parser") or ""}
+        cfg = copy.deepcopy(campaign.config or {})
+        recent = list(cfg.get("last_attachments") or [])
+        recent.insert(0, _stored)
+        cfg["last_attachments"] = recent[:5]
+        campaign.config = cfg; db.commit()
+
     group_id = str(payload.get("group_id", "")).strip()
     group_history: list[dict] = []
     group_history_error = ""
