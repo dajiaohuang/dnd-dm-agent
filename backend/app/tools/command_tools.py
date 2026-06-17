@@ -1475,8 +1475,12 @@ def tools_for_scope(campaign: Campaign, is_dm: bool, message: str = "") -> list[
     """Return tools available given the current campaign mode, user role, and message context."""
     from app.campaign_control import play_style
     from app.campaign_turns import runtime_mode
-    mode = runtime_mode(campaign)
-    style = play_style(campaign)
+    if campaign is None:
+        mode = "free"
+        style = "lobby"
+    else:
+        mode = runtime_mode(campaign)
+        style = play_style(campaign)
     msg_lower = message.lower() if message else ""
 
     dm_only_commands = {
