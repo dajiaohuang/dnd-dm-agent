@@ -163,128 +163,93 @@ def compress_campaign_events(db, campaign: Campaign, proposal_data: dict[str, An
 
 
 def complete_character_sheet(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
-    """Background subagent: fill missing equipment/skills/spells for a character."""
+    """Background subagent: fill/refine character sheet — equipment, backstory, or appearance."""
     char_id = str((proposal_data.get("proposal") or {}).get("character_id") or "")
+    focus = str((proposal_data.get("proposal") or {}).get("focus") or "all")
     character = db.get(Character, char_id) if char_id else None
     if not character or character.campaign_id != campaign.id:
         raise ValueError("character not found")
     char_data = character.data or {}
     basic = char_data.get("basic", {})
-    abilities = char_data.get("abilities", {})
-
-    # Build a rich prompt for the LLM
-    context = {
-        "name": character.character_name,
-        "class": basic.get("classes", [{}])[0].get("name", "?"),
-        "level": basic.get("classes", [{}])[0].get("level", 1),
-        "ancestry": basic.get("ancestry", ""),
-        "background": basic.get("background", ""),
-        "abilities": abilities,
-        "current_inventory": [i.get("name") for i in (char_data.get("inventory") or [])[:10]],
-        "current_skills": [k for k, v in (char_data.get("skills") or {}).items()
-                           if isinstance(v, dict) and v.get("proficient")],
-    }
     import json as _j
-    llm_result = chat_completion([{
-        "role": "system", "content": (
-            "You are a D&D 5E character equipment designer. "
-            "Based on the character's class, level, ancestry and background, "
-            "suggest appropriate starting equipment (weapons, armor, gear), "
-            "and note which skills should be proficient. "
-            "Return a JSON with keys: inventory (list of {name,item_type,equipped,damage?,damage_type?,weight?,properties?}), "
-            "skills (list of skill names that should be proficient), "
-            "and notes (short Chinese description of your choices)."
-        ),
-    }, {"role": "user", "content": f"Character:\n{_j.dumps(context, ensure_ascii=False)}"}], temperature=0.5)
-    try:
-        suggestion = _j.loads(llm_result or "{}")
-    except Exception:
-        suggestion = {"inventory": [], "skills": [], "notes": "生成失败，请手动补全。"}
-
-    # Write back to character data
+    result = {"kind": "character_sheet_completed", "character_id": character.id}
     data = dict(char_data)
-    existing_inv = list(data.get("inventory") or [])
-    for item in suggestion.get("inventory") or []:
-        item.setdefault("item_type", "gear")
-        item.setdefault("equipped", item.get("item_type") == "weapon")
-        item.setdefault("quantity", 1)
-        existing_inv.append(item)
-    data["inventory"] = existing_inv
 
-    skills = dict(data.get("skills") or {})
-    for sk in suggestion.get("skills") or []:
-        if sk not in skills:
-            skills[sk] = {"proficient": True, "expertise": False, "bonus": 0}
-    data["skills"] = skills
+    # ── Equipment ──
+    if focus in ("equipment", "all"):
+        context = {
+            "name": character.character_name,
+            "class": basic.get("classes", [{}])[0].get("name", "?"),
+            "level": basic.get("classes", [{}])[0].get("level", 1),
+            "ancestry": basic.get("ancestry", ""),
+            "background": basic.get("background", ""),
+            "abilities": char_data.get("abilities", {}),
+            "current_inventory": [i.get("name") for i in (char_data.get("inventory") or [])[:10]],
+            "current_skills": [k for k, v in (char_data.get("skills") or {}).items()
+                               if isinstance(v, dict) and v.get("proficient")],
+        }
+        llm_result = chat_completion([{
+            "role": "system", "content": (
+                "You are a D&D 5E character equipment designer. "
+                "Suggest weapons, armor, gear. Return JSON: {inventory:[{name,item_type,equipped,damage?,damage_type?,weight?}], skills:[], notes:\"\"}"
+            ),
+        }, {"role": "user", "content": f"Character:\n{_j.dumps(context, ensure_ascii=False)}"}], temperature=0.5)
+        try:
+            sug = _j.loads(llm_result or "{}")
+        except Exception:
+            sug = {}
+        existing_inv = list(data.get("inventory") or [])
+        for item in sug.get("inventory") or []:
+            item.setdefault("item_type", "gear"); item.setdefault("equipped", True); item.setdefault("quantity", 1)
+            existing_inv.append(item)
+        data["inventory"] = existing_inv
+        skills = dict(data.get("skills") or {})
+        for sk in sug.get("skills") or []:
+            if sk not in skills: skills[sk] = {"proficient": True, "expertise": False, "bonus": 0}
+        data["skills"] = skills
+        result["inventory_added"] = len(sug.get("inventory") or [])
+        result["skills_added"] = len(sug.get("skills") or [])
+
+    # ── Backstory ──
+    if focus in ("backstory", "all"):
+        context = {
+            "name": character.character_name,
+            "class": basic.get("classes", [{}])[0].get("name", "?"),
+            "ancestry": basic.get("ancestry", ""),
+            "background": basic.get("background", ""),
+            "alignment": basic.get("alignment", ""),
+            "traits": (char_data.get("personality") or {}).get("traits", ""),
+            "campaign": campaign.name if campaign else "",
+        }
+        story = chat_completion([{
+            "role": "system", "content": "Write a 200-word character backstory in Chinese. Return ONLY the story text, no JSON."
+        }, {"role": "user", "content": _j.dumps(context, ensure_ascii=False)}], temperature=0.8)
+        personality = dict(data.get("personality") or {})
+        personality["backstory"] = (story or "").strip()
+        data["personality"] = personality
+        result["backstory_length"] = len(personality["backstory"])
+
+    # ── Appearance ──
+    if focus in ("appearance", "all"):
+        context = {
+            "name": character.character_name,
+            "ancestry": basic.get("ancestry", ""),
+            "class": basic.get("classes", [{}])[0].get("name", "?"),
+            "gender": basic.get("gender", ""),
+            "age": basic.get("age", ""),
+            "existing": basic.get("appearance", ""),
+        }
+        appearance = chat_completion([{
+            "role": "system", "content": "Describe this character's appearance in Chinese: hair, eyes, height, build, clothing style. 2-3 sentences. Return ONLY the description."
+        }, {"role": "user", "content": _j.dumps(context, ensure_ascii=False)}], temperature=0.8)
+        data["basic"] = dict(data.get("basic") or {})
+        data["basic"]["appearance"] = (appearance or "").strip()
+        result["appearance_length"] = len(data["basic"]["appearance"])
+
     character.data = data
     db.commit()
-    return {"kind": "character_sheet_completed", "character_id": character.id,
-            "inventory_added": len(suggestion.get("inventory") or []),
-            "skills_added": len(suggestion.get("skills") or []),
-            "notes": suggestion.get("notes", "")}
-def generate_npc_batch(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
-    """Background subagent: generate a batch of NPC settings via LLM."""
-    proposal = proposal_data.get("proposal") or {}
-    batch_start = int(proposal.get("batch_start", 0))
-    batch_size = int(proposal.get("batch_size", 6))
-    theme = str(proposal.get("theme") or campaign.description or "fantasy")
-    total_count = int(proposal.get("total_count", batch_size))
-
-    import json as _j
-    llm_result = chat_completion([{
-        "role": "system", "content": (
-            f"You are a D&D 5E NPC designer. Generate {batch_size} unique NPCs "
-            f"for a {theme} setting. Each NPC needs: name, occupation, race, "
-            f"age, alignment, personality (1 sentence), appearance (1 sentence), "
-            f"secret or motivation (1 sentence). "
-            f"Return ONLY a JSON array of NPC objects with keys: "
-            f"name, occupation, ancestry, age, alignment, personality, appearance, secret."
-        ),
-    }, {"role": "user", "content": f"Generate NPCs {batch_start+1}-{batch_start+batch_size} of {total_count}"}],
-        temperature=0.8)
-
-    try:
-        npcs = _j.loads(llm_result or "[]")
-    except Exception:
-        npcs = [{"name": f"NPC {batch_start+i}", "occupation": "villager", "ancestry": "human",
-                 "age": "adult", "alignment": "neutral", "personality": "ordinary",
-                 "appearance": "ordinary", "secret": "none"} for i in range(1, batch_size+1)]
-
-    from app.campaign_editor import create_draft
-    from app.services import uid
-
-    created = []
-    for npc in npcs:
-        draft = create_draft(db, campaign.id, "create", proposal={
-            "category": "npc", "name": npc.get("name", "?"),
-            "description": (
-                f"职业: {npc.get('occupation','?')} | 种族: {npc.get('ancestry','?')} | "
-                f"阵营: {npc.get('alignment','?')}\n"
-                f"性格: {npc.get('personality','?')}\n外貌: {npc.get('appearance','?')}\n"
-                f"秘密: {npc.get('secret','?')}"
-            ),
-        })
-        created.append(draft.name)
-
-    from app.campaign_editor import publish_drafts, setting_to_npc_character, list_settings
-    published = publish_drafts(db, campaign.id)
-    # Also create character cards from settings if requested
-    card_names = []
-    if proposal.get("create_cards"):
-        npc_settings = [s for s in list_settings(db, campaign.id) if s.category == "npc"]
-        for s in npc_settings:
-            ch = setting_to_npc_character(db, s)
-            if ch:
-                card_names.append(ch.character_name)
-    return {
-        "kind": "npc_batch_generated",
-        "batch": f"{batch_start+1}-{min(batch_start+batch_size, total_count)}",
-        "settings_published": len(published),
-        "character_cards": len(card_names),
-        "names": created,
-    }
-
-
+    result["focus"] = focus
+    return result
 def generate_content(db, campaign: Campaign, proposal_data: dict[str, Any]) -> dict[str, Any]:
     """Unified content writer subagent — dispatches by content type."""
     proposal = proposal_data.get("proposal") or {}

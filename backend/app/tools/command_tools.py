@@ -221,7 +221,7 @@ COMMAND_TOOLS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "character_name": {"type": "string", "description": "角色名"},
+                    "character_name": {"type": "string", "description": "角色名"}, "focus": {"type": "string", "description": "补全方向", "default": "all"},
                     "class_name": {"type": "string", "description": "职业，如 法师/战士/游荡者"},
                     "level": {"type": "integer", "description": "等级，默认1", "default": 1},
                     "ancestry": {"type": "string", "description": "种族，如 人类/精灵/矮人", "default": "人类"},
@@ -1119,7 +1119,7 @@ def handle_read_attachment(
 
 def handle_complete_character_sheet(
     db: Session, campaign: Campaign,
-    character_name: str = "", **_kw: Any,
+    character_name: str = "", focus: str = "all", **_kw: Any,
 ) -> dict:
     """Enqueue background subagent to complete a character sheet."""
     from sqlalchemy import select as _sel
@@ -1137,7 +1137,7 @@ def handle_complete_character_sheet(
         platform="system", chat_id=None, owner_user_id=None, session_id=None,
         status="queued", priority=2, draft_data={},
         proposal_data={"agent_role": "character_sheet_completer",
-                       "proposal": {"character_id": character.id}},
+                       "proposal": {"character_id": character.id, "focus": focus}},
         missing_fields=[], next_prompt=f"补全{character_name}的角色卡。",
     )
     db.add(task); db.commit()
