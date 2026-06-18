@@ -286,15 +286,15 @@ def test_dnd_dm_soul_in_system_prompt(tmp_path) -> None:
     assert "规则为信仰，骰子为审判官" in prompt
 
 
-def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
-    """Identity template should not contain behavioral rules or hardcoded name."""
+def test_identity_declares_dnd_dm_runtime_contract(tmp_path) -> None:
+    """Identity template should establish the default Minthara DM contract."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
     identity = builder._get_identity(channel=None)
-    assert "You are nanobot" not in identity
-    assert "Act, don't narrate" not in identity
-    assert "Execution Rules" not in identity
+    assert "明萨拉·班瑞" in identity
+    assert "always-active `dnd-dm` Skill" in identity
+    assert "only mechanical rules engine" in identity
 
 
 def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) -> None:
@@ -400,12 +400,14 @@ def test_always_skills_excluded_from_skills_index(tmp_path) -> None:
     # memory skill should be in Active Skills section
     assert "# Active Skills" in prompt
     assert "### Skill: memory" in prompt
+    assert "### Skill: dnd-dm" in prompt
 
     # memory skill should NOT appear in the skills index
     skills_section = prompt.split("# Skills\n", 1)
     if len(skills_section) > 1:
         index_text = skills_section[1].split("\n\n---")[0]
         assert "**memory**" not in index_text
+        assert "**dnd-dm**" not in index_text
 
 
 def test_template_memory_md_is_skipped(tmp_path) -> None:

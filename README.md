@@ -9,6 +9,13 @@ dnd-dm-agent 将在此基础上进行二次开发，并默认集成 [dnd-dm-skil
 - Agent 框架：[HKUDS/nanobot](https://github.com/HKUDS/nanobot)
 - D&D DM Soul 与 Skill：[ackiles/dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill)
 
+## 默认 Agent
+
+NanoBot 在本仓库中仅作为运行时框架。默认 Agent 已替换为
+**明萨拉·班瑞 D&D DM**：CLI 名称与图标、系统 Identity、新工作区的
+`IDENTITY.md`、`SOUL.md`、`AGENTS.md`、`USER.md`、`TOOLS.md`，以及常驻 Skill
+均来自或适配自 dnd-dm-skill 1.1.8。`dnd-dm` 无需用户手动选择，每轮都会加载。
+
 ## 架构方向
 
 本项目参考仓库 `old_ver` 分支中已经验证的 D&D DM Agent 数据架构，并由 NanoBot 接管通用 Agent 运行时：
@@ -25,7 +32,7 @@ D&D Adapter / Tools
   身份与权限 · 战役作用域 · 状态读写 · 工具调用
         │
         ▼
-dnd-dm-skill/code
+dnd-dm-skill/dnd-engine
   唯一规则引擎 · 骰子 · 战斗 · 角色 · 存档
         │
         ▼
@@ -37,8 +44,9 @@ dnd-dm-skill/code
 
 数据库层位于 `nanobot/dnd/db/`，默认使用 `~/.nanobot/dnd/dnd_dm.db`，也可通过 `DND_DATABASE_URL` 指向其他 SQLite 或 PostgreSQL 数据库。
 
-规则和机械计算的唯一实现来自内置 `nanobot/skills/dnd-dm/code/`，其同步基线为
-`D:\repo\dnd-dm-skill\code`。数据库不重新实现命中、伤害、升级、骰子或存档规则，
+规则和机械计算的唯一实现来自内置
+`nanobot/skills/dnd-dm/dnd-engine/src/dnd_engine/`（dnd-dm-skill 1.1.8）。
+数据库不重新实现命中、伤害、升级、骰子或存档规则，
 只持久化该引擎产生的输入、输出和状态。
 
 当前 Schema 按 dnd-dm-skill 的运行文件重构：
@@ -59,7 +67,7 @@ dnd-dm-skill/code
 
 复杂状态采用带 `schema_version` 和 `state_version` 的 JSON 聚合；角色 HP、等级、AC 等高频字段单独成列。数据库升级由内置 Alembic Revision 管理。
 
-审计表记录调用者、`code/` 函数、参数、结果、执行前后状态、耗时和状态版本。
+审计表记录调用者、`dnd_engine.*` 函数、参数、结果、执行前后状态、耗时和状态版本。
 `state_revisions` 采用只追加记录，用于解释状态变化、排查重复扣血并为后续撤销提供依据，
 但不参与 D&D 规则计算。
 

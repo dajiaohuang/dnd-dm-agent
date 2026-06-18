@@ -128,7 +128,9 @@ def test_skill_aggregate_state_round_trip(database: Database) -> None:
         assert world is not None and world.state_json["current_chapter"] == 1
         assert character is not None and character.sheet_json["spellSlots"] == [4, 2]
         assert binding is not None and binding.character_id == character.id
-        assert session.get(Campaign, "campaign_1").engine_source == "dnd-dm-skill/code"
+        assert session.get(Campaign, "campaign_1").engine_source == (
+            "dnd-dm-skill/dnd-engine/src/dnd_engine"
+        )
 
 
 def test_combat_save_event_and_audit_round_trip(database: Database) -> None:
@@ -187,7 +189,7 @@ def test_combat_save_event_and_audit_round_trip(database: Database) -> None:
                 campaign_id="campaign_1",
                 actor_id="123456",
                 tool_name="dnd_roll",
-                engine_function="code.dice.rolls.rolling",
+                engine_function="dnd_engine.dice.rolls.rolling",
                 arguments_json={"formula": "1d20+5"},
                 result_json={"result": 17},
                 before_state_json={"roll_count": 0},
@@ -205,7 +207,7 @@ def test_combat_save_event_and_audit_round_trip(database: Database) -> None:
                 actor_id="123456",
                 aggregate_type="world",
                 aggregate_key="default",
-                engine_function="code.state.world.set_current_scene_state",
+                engine_function="dnd_engine.state.world.set_current_scene_state",
                 state_version=2,
                 before_state_json={"current_scene": "Gate"},
                 after_state_json={"current_scene": "Tavern"},
@@ -219,7 +221,7 @@ def test_combat_save_event_and_audit_round_trip(database: Database) -> None:
         audit = session.get(ToolAudit, "audit_1")
         revision = session.get(StateRevision, "revision_1")
         assert audit.state_version == 1 and audit.success is True
-        assert audit.engine_function == "code.dice.rolls.rolling"
+        assert audit.engine_function == "dnd_engine.dice.rolls.rolling"
         assert revision.after_state_json == {"current_scene": "Tavern"}
 
 
@@ -261,7 +263,7 @@ def test_audit_records_are_append_only(database: Database) -> None:
                 request_id="request_1",
                 campaign_id="campaign_1",
                 tool_name="dnd_world",
-                engine_function="code.state.world.advance_day",
+                engine_function="dnd_engine.state.world.advance_day",
                 result_json={"day_in_game": 2},
             )
         )

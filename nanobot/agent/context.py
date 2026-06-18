@@ -51,7 +51,7 @@ async def handle_runtime_control(state: Any, msg: InboundMessage, tools: ToolReg
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"]
+    BOOTSTRAP_FILES = ["IDENTITY.md", "SOUL.md", "AGENTS.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
     _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from nanobot.dnd.db.database import Base
 from nanobot.dnd.db.models.common import TimestampMixin
+from nanobot.dnd.engine import ENGINE_SOURCE_ID
 
 
 class Campaign(TimestampMixin, Base):
@@ -18,7 +19,7 @@ class Campaign(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     system_version: Mapped[str] = mapped_column(String, default="D&D 5e 2024")
     module_name: Mapped[str | None] = mapped_column(String)
-    engine_source: Mapped[str] = mapped_column(String, default="dnd-dm-skill/code")
+    engine_source: Mapped[str] = mapped_column(String, default=ENGINE_SOURCE_ID)
     engine_version: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="active", index=True)
     description: Mapped[str | None] = mapped_column(Text)

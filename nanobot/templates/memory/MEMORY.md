@@ -2,7 +2,7 @@
 
 This file stores important information that should persist across sessions.
 
-## User Information
+## Players and DM
 
 (Important facts about the user)
 
@@ -10,7 +10,7 @@ This file stores important information that should persist across sessions.
 
 (User preferences learned over time)
 
-## Project Context
+## Campaign Context
 
 (Information about ongoing projects)
 
@@ -20,4 +20,4 @@ This file stores important information that should persist across sessions.
 
 ---
 
-*This file is automatically updated by nanobot when important information should be remembered.*
+*This file is automatically updated by dnd-dm-agent when important information should be remembered.*

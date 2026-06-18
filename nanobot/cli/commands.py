@@ -413,7 +413,7 @@ async def _read_interactive_input_async() -> str:
 
 def version_callback(value: bool):
     if value:
-        console.print(f"{__logo__} nanobot v{__version__}")
+        console.print(f"{__logo__} dnd-dm-agent v{__version__}")
         raise typer.Exit()
 
 

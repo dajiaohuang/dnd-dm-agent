@@ -68,7 +68,7 @@ class ToolAudit(Base):
 
 
 class StateRevision(Base):
-    """Append-only record of state written after a dnd-dm-skill/code call."""
+    """Append-only record of state written after a bundled dnd_engine call."""
 
     __tablename__ = "state_revisions"
     __table_args__ = (

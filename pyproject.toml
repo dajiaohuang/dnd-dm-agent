@@ -178,7 +178,7 @@ include = [
 line-length = 100
 target-version = "py311"
 exclude = [
-    "nanobot/skills/dnd-dm/code",
+    "nanobot/skills/dnd-dm/dnd-engine",
     "nanobot/skills/dnd-dm/srd/scripts",
 ]
 

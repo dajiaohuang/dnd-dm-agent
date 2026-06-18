@@ -181,7 +181,7 @@ async def test_print_interactive_progress_line_pauses_spinner_before_printing():
 
 def test_response_renderable_uses_text_for_explicit_plain_rendering():
     status = (
-        "🐈 nanobot v0.1.4.post5\n"
+        "🎲 dnd-dm-agent v0.1.4.post5\n"
         "🧠 Model: MiniMax-M2.7\n"
         "📊 Tokens: 20639 in / 29 out"
     )
@@ -202,7 +202,7 @@ def test_response_renderable_preserves_normal_markdown_rendering():
 
 
 def test_response_renderable_without_metadata_keeps_markdown_path():
-    help_text = "🐈 nanobot commands:\n/status — Show bot status\n/help — Show available commands"
+    help_text = "🎲 dnd-dm-agent commands:\n/status — Show bot status\n/help — Show available commands"
 
     renderable = commands._response_renderable(help_text, render_markdown=True)
 

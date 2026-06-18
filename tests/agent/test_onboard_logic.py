@@ -346,14 +346,14 @@ class TestSyncWorkspaceTemplates:
         content = (workspace / "AGENTS.md").read_text()
         assert content == "existing content"
 
-    def test_does_not_create_tools_md(self, tmp_path):
-        """Tool contract is injected internally, not copied into user workspaces."""
+    def test_creates_dnd_tools_md(self, tmp_path):
+        """D&D runtime notes are copied into new workspaces."""
         workspace = tmp_path / "workspace"
 
         added = sync_workspace_templates(workspace, silent=True)
 
-        assert "TOOLS.md" not in added
-        assert not (workspace / "TOOLS.md").exists()
+        assert "TOOLS.md" in added
+        assert (workspace / "TOOLS.md").exists()
 
     def test_preserves_existing_tools_md_without_overwriting(self, tmp_path):
         """Legacy user workspaces may have TOOLS.md; sync should leave it untouched."""

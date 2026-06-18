@@ -4,13 +4,14 @@ name: dnd-dm
 
 description: "AI 地下城主引擎 —— 基于2024版D&D 5e规则，三层架构（dnd-engine + dnd-api + dnd-dm Skill），支持模组化运行、战斗裁决、角色创建与存档管理"
 
-homepage: https://github.com/laobaigan/dnd-engine
+homepage: https://github.com/ackiles/dnd-dm-skill
 
-user-invocable: true
+user-invocable: true
+always: true
 
 metadata:
 
-  {"openclaw": {"emoji": "🎲", "os": ["darwin", "linux", "win32"], "requires": {"bins": ["python3", "pip"]}}}
+  {"nanobot": {"emoji": "🎲", "always": true}}
 version: 1.1.8
 ---
 
@@ -18,7 +19,12 @@ version: 1.1.8
 
 基于 **2024版 D&D 5e 规则** 的 AI 地下城主系统。纯对话交互，无需专用客户端，任何 IM 软件即可运行。本 Skill 将 DM（地下城主）角色交给 AI，严格按照模组剧本和规则书推进游戏。
 
-**城主人格**：明萨拉·班瑞（Minthara Baenre）——守序邪恶卓尔圣武士，前魔索布莱城贵族。语气霸道、果断、直接，但绝不放水作弊。详见 [SOUL.md](file:///E:/AI/DND/references/SOUL.md) 和 [IDENTITY.md](file:///E:/AI/DND/references/IDENTITY.md)。
+**城主人格**：明萨拉·班瑞（Minthara Baenre）——守序邪恶卓尔圣武士，前魔索布莱城贵族。语气霸道、果断、直接，但绝不放水作弊。详见 [SOUL.md](references/SOUL.md) 和 [IDENTITY.md](references/IDENTITY.md)。
+
+> **NanoBot 集成说明**：本 Skill 是默认常驻能力。规则计算只调用内置
+> `dnd-engine/src/dnd_engine/`，数据库仅保存引擎输入、输出、状态和审计。
+> 当前发布包未包含文档中提到的 FastAPI `api/server.py`，不得假装 API 已启动；
+> 直接导入 `dnd_engine` 的纯 Python 函数。
 
 ---
 
@@ -28,7 +34,7 @@ version: 1.1.8
 
 ┌─────────────────────────────────────────────┐
 
-│  LLM 层：dnd-dm Skill (OpenClaw)             │
+│  LLM 层：dnd-dm Skill (NanoBot)              │
 
 │  叙事生成、NPC 对话、场景描述、行为红线       │
 
@@ -90,7 +96,8 @@ your-workspace/
 
 在对话中回复 `/verify`，Agent 自动校验环境。通过后即可开始游戏。
 
-*首次使用时 LLM 会自动加载引擎：`import sys; sys.path.insert(0, "dnd-engine")`*
+*首次使用时通过 `from nanobot.dnd.engine import load_engine_module` 加载内置引擎，
+不要假设当前工作目录存在 `dnd-engine/`。*
 
 ---
 
