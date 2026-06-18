@@ -1,16 +1,6 @@
 {
-  "name": "dnd-dm",
-  "description": "AI 地下城主引擎 —— 基于2024版D&D 5e规则，三层架构（dnd-engine + dnd-api + dnd-dm Skill），支持模组化运行、战斗裁决、角色创建与存档管理",
-  "version": "1.1.4",
-  "author": "老白干一杯",
-  "tags": [
-    "dnd",
-    "dm",
-    "rpg",
-    "ttrpg",
-    "dungeon-master",
-    "dnd5e"
-  ],
-  "runtime": "agent",
-  "workspace": true
+  "ownerId": "kn79jzdp9ehvfrask6tf67bvmx84fb09",
+  "slug": "dnd-dm-skill",
+  "version": "1.1.8",
+  "publishedAt": 1781020354700
 }

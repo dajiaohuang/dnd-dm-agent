@@ -19,6 +19,7 @@ from nanobot.dnd.db.models import (
     Combat,
     DiceRoll,
     Party,
+    StateRevision,
     ToolAudit,
     WorldState,
 )
@@ -55,6 +56,7 @@ def test_migration_creates_v2_domain_schema_without_legacy_mode_tables(
         "scene_states",
         "dice_rolls",
         "tool_audits",
+        "state_revisions",
         "rule_sources",
         "rule_chunks",
         "compendium_entries",
@@ -126,6 +128,7 @@ def test_skill_aggregate_state_round_trip(database: Database) -> None:
         assert world is not None and world.state_json["current_chapter"] == 1
         assert character is not None and character.sheet_json["spellSlots"] == [4, 2]
         assert binding is not None and binding.character_id == character.id
+        assert session.get(Campaign, "campaign_1").engine_source == "dnd-dm-skill/code"
 
 
 def test_combat_save_event_and_audit_round_trip(database: Database) -> None:
@@ -170,6 +173,7 @@ def test_combat_save_event_and_audit_round_trip(database: Database) -> None:
         session.add(
             DiceRoll(
                 id="roll_1",
+                request_id="request_1",
                 campaign_id="campaign_1",
                 formula="1d20+5",
                 result=17,
@@ -179,12 +183,32 @@ def test_combat_save_event_and_audit_round_trip(database: Database) -> None:
         session.add(
             ToolAudit(
                 id="audit_1",
+                request_id="request_1",
                 campaign_id="campaign_1",
                 actor_id="123456",
                 tool_name="dnd_roll",
+                engine_function="code.dice.rolls.rolling",
                 arguments_json={"formula": "1d20+5"},
                 result_json={"result": 17},
+                before_state_json={"roll_count": 0},
+                after_state_json={"roll_count": 1},
+                duration_ms=4,
                 state_version=1,
+            )
+        )
+        session.flush()
+        session.add(
+            StateRevision(
+                id="revision_1",
+                campaign_id="campaign_1",
+                tool_audit_id="audit_1",
+                actor_id="123456",
+                aggregate_type="world",
+                aggregate_key="default",
+                engine_function="code.state.world.set_current_scene_state",
+                state_version=2,
+                before_state_json={"current_scene": "Gate"},
+                after_state_json={"current_scene": "Tavern"},
             )
         )
 
@@ -192,7 +216,11 @@ def test_combat_save_event_and_audit_round_trip(database: Database) -> None:
         assert session.get(Combat, "combat_1").state_json["units"][0]["hp"] == 9
         assert session.get(CampaignSave, "save_1").snapshot_json["plotSummary"]
         assert session.get(DiceRoll, "roll_1").result == 17
-        assert session.get(ToolAudit, "audit_1").state_version == 1
+        audit = session.get(ToolAudit, "audit_1")
+        revision = session.get(StateRevision, "revision_1")
+        assert audit.state_version == 1 and audit.success is True
+        assert audit.engine_function == "code.dice.rolls.rolling"
+        assert revision.after_state_json == {"current_scene": "Tavern"}
 
 
 def test_channel_binding_uniqueness_rolls_back_transaction(database: Database) -> None:
@@ -221,3 +249,23 @@ def test_channel_binding_uniqueness_rolls_back_transaction(database: Database) -
 
     with database.transaction() as session:
         assert session.scalar(select(ChannelBinding)) is None
+
+
+def test_audit_records_are_append_only(database: Database) -> None:
+    with database.transaction() as session:
+        session.add(Campaign(id="campaign_1", name="Avernus"))
+        session.flush()
+        session.add(
+            ToolAudit(
+                id="audit_1",
+                request_id="request_1",
+                campaign_id="campaign_1",
+                tool_name="dnd_world",
+                engine_function="code.state.world.advance_day",
+                result_json={"day_in_game": 2},
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="append-only"), database.transaction() as session:
+        audit = session.get(ToolAudit, "audit_1")
+        audit.result_json = {"day_in_game": 99}

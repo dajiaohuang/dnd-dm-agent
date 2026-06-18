@@ -1,265 +1,120 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>博德之门：坠入阿弗纳斯 — 小队角色卡</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#1a1a1a;color:#ddd;font-family:"Segoe UI","Microsoft YaHei",sans-serif;padding:20px}
-h1{color:#c88;font-size:20px;text-align:center;padding:10px 0 4px;letter-spacing:2px}
-.sub{text-align:center;color:#888;font-size:12px;margin-bottom:16px}
-.tabs{display:flex;gap:2px;margin-bottom:16px;flex-wrap:wrap}
-.tab{padding:8px 18px;background:#222;border:1px solid #333;border-radius:8px 8px 0 0;cursor:pointer;color:#888;font-size:13px}
-.tab.active{color:#da5;border-color:#da5;background:#1a1a1a}
-.tab:hover{color:#da5}
-.all-4up{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-@media(max-width:960px){.all-4up{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:540px){.all-4up{grid-template-columns:1fr}}
-.card{background:#1e1a16;border:2px solid #3a2a1a;border-radius:12px;overflow:hidden}
-.all-4up .card{display:flex;flex-direction:column}
-.all-4up .content{flex:1;display:grid;grid-template-columns:1fr}
-.all-4up .card-header .name{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.all-4up .hp-big{font-size:20px}.all-4up .stat-title{font-size:9px}.all-4up .section-title{font-size:10px}
-.all-4up .ability-row .ab{font-size:11px;min-width:28px}.all-4up .ability-row .val{font-size:15px}
-.all-4up .ability-row .mod{font-size:11px}.all-4up .sv-row{padding:1px 4px;font-size:11px}
-.all-4up .prof-box{padding:4px}.all-4up .prof-box .big{font-size:18px}
-.all-4up .section{margin-bottom:6px}.all-4up .skill-grid{grid-template-columns:1fr}
-.all-4up .res-item{padding:2px 6px;font-size:11px}
-.all-4up .feature-tag{padding:1px 6px;font-size:10px;margin:1px}
-.all-4up .items-list{font-size:11px;line-height:1.5;padding-left:14px}
-.card-header{background:linear-gradient(160deg,#1c2834,#0f1a24);padding:14px 20px;border-bottom:2px solid #2a3f4f}
-.card-header .h-row{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
-.card-header .name{font-size:22px;font-weight:800;color:#eed8b0}
-.card-header .race-cls{font-size:13px;color:#9ab;margin-top:2px}
-.hp-big{color:#e55;font-size:28px;font-weight:800}.hp-label{font-size:11px;color:#999}
-.xp-bar{background:#182018;border-radius:3px;height:8px;overflow:hidden;margin:6px 0 0}
-.xp-fill{height:100%;background:linear-gradient(90deg,#486348,#6a9a6a);border-radius:3px}
-.content{display:grid;grid-template-columns:240px 1fr;gap:0}
-.left-col{padding:14px;background:#181410;border-right:1px solid #2a1f18}
-.right-col{padding:14px}
-.stat-block{margin-bottom:12px}
-.stat-title{font-size:10px;color:#887766;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;font-weight:700}
-.ability-row{display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-bottom:1px solid #1e1814}
-.ability-row .ab{font-size:13px;color:#ba9;min-width:34px;font-weight:600}
-.ability-row .val{font-size:18px;font-weight:800;color:#eed8b0;text-align:center}
-.ability-row .mod{font-size:13px;color:#8a8;text-align:center;font-weight:600}
-.sv-row{display:flex;justify-content:space-between;padding:3px 6px;border-bottom:1px solid #1e1814;font-size:12px}
-.prof-box{text-align:center;background:#1a1510;border:1px solid #2a2218;border-radius:6px;padding:6px;margin-top:10px}
-.prof-box .big{font-size:22px;font-weight:800;color:#8ac}.prof-box .lbl{font-size:10px;color:#887766;text-transform:uppercase}
-.section{margin-bottom:14px}
-.section-title{font-size:11px;color:#b88;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #2a1f1a;padding-bottom:3px;margin-bottom:6px;font-weight:700}
-.skill-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 10px}
-.res-item{display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #1e1814}
-.res-item .rn{font-size:12px;color:#ba9}.res-item .rv{font-size:12px;color:#eed8b0;font-weight:600}
-.attacks-table{width:100%;border-collapse:collapse;font-size:12px}
-.attacks-table th{text-align:left;padding:4px 6px;border-bottom:1px solid #2a1f1a;color:#887766;font-size:10px;text-transform:uppercase}
-.attacks-table td{padding:4px 6px;border-bottom:1px solid #1e1814;color:#ddd}
-.attacks-table td:nth-child(1){color:#eed8b0;font-weight:600}
-.feature-tag{display:inline-block;background:#1a1510;border:1px solid #2a2218;border-radius:10px;padding:2px 10px;font-size:11px;color:#9ab;margin:2px}
-.items-list{font-size:12px;line-height:1.6;padding-left:18px;color:#ccc}
-.items-list li{margin-bottom:2px}
-.gear-list{font-size:12px;color:#aaa;line-height:1.5}
-.item-count{color:#888;font-size:11px}
-.ac-detail{color:#b88;font-size:11px;margin-top:2px}
-</style>
-</head>
-<body>
-<h1>⚔️ 博德之门：坠入阿弗纳斯</h1>
-<div class="sub">小队角色卡 · 第二章 · 大墓地入口</div>
-<div id="tabs" class="tabs"></div>
-<div id="root"></div>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>博德之门：坠入阿弗纳斯 — 小队角色卡</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a1a;color:#ddd;font-family:"Segoe UI","Microsoft YaHei",sans-serif;padding:20px}
+.all-4up{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:960px){.all-4up{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:540px){.all-4up{grid-template-columns:1fr}}
+h1{color:#c88;font-size:20px;text-align:center;padding:10px 0 4px}
+.sub{text-align:center;color:#888;font-size:12px;margin-bottom:16px}
+.card{background:#1e1a16;border:2px solid #3a2a1a;border-radius:12px;margin-bottom:16px;overflow:hidden}
+.card-header{background:linear-gradient(160deg,#1c2834,#0f1a24);padding:14px 20px;border-bottom:2px solid #2a3f4f}
+.h-row{display:flex;justify-content:space-between;align-items:flex-start}
+.name{font-size:22px;font-weight:800;color:#eed8b0}
+.race-cls{font-size:13px;color:#9ab;margin-top:2px}
+.hp-big{color:#e55;font-size:28px;font-weight:800}
+.hp-label{font-size:11px;color:#999}
+.ac-detail{color:#b88;font-size:11px;margin-top:2px}
+.xp-bar{background:#182018;border-radius:3px;height:8px;overflow:hidden;margin:6px 0 0}
+.xp-fill{height:100%;background:linear-gradient(90deg,#486348,#6a9a6a);border-radius:3px}
+.pad{padding:14px}
+.stat-title{font-size:10px;color:#887766;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;font-weight:700}
+.ability-row{display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-bottom:1px solid #1e1814;font-size:13px}
+.ability-row .ab{color:#ba9;min-width:34px;font-weight:600}
+.ability-row .val{font-size:18px;font-weight:800;color:#eed8b0}
+.ability-row .mod{color:#8a8;font-weight:600}
+.sv-row{display:flex;justify-content:space-between;padding:3px 6px;border-bottom:1px solid #1e1814;font-size:12px}
+.prof-box{text-align:center;background:#1a1510;border:1px solid #2a2218;border-radius:6px;padding:6px;margin-top:10px}
+.prof-box .big{font-size:22px;font-weight:800;color:#8ac}
+.prof-box .lbl{font-size:10px;color:#887766;text-transform:uppercase}
+.section{margin-bottom:14px}
+.section-title{font-size:11px;color:#b88;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #2a1f1a;padding-bottom:3px;margin-bottom:6px;font-weight:700}
+.skill-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 10px}
+.res-item{display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #1e1814;font-size:12px}
+.res-item .rn{color:#ba9}
+.res-item .rv{color:#eed8b0;font-weight:600}
+.attacks-table{width:100%;border-collapse:collapse;font-size:12px}
+.attacks-table th{text-align:left;padding:4px 6px;border-bottom:1px solid #2a1f1a;color:#887766;font-size:10px}
+.attacks-table td{padding:4px 6px;border-bottom:1px solid #1e1814;color:#ddd}
+.attacks-table td:nth-child(1){color:#eed8b0;font-weight:600}
+.feature-tag{display:inline-block;background:#1a1510;border:1px solid #2a2218;border-radius:10px;padding:2px 10px;font-size:11px;color:#9ab;margin:2px}
+.items-list{font-size:12px;line-height:1.6;padding-left:18px;color:#ccc}
+.items-list li{margin-bottom:2px}
+.gear-list{font-size:12px;color:#aaa;line-height:1.5}
+.eq-row{font-size:12px;padding:3px 6px;border-bottom:1px solid #1e1814}
+.eq-slot{color:#b88;font-weight:600}
+.eq-bonus{color:#8a8}
+.spell-lvl{color:#8a7;font-size:11px;font-weight:700;margin:6px 0 2px}
+.spell-row{padding:2px 4px;font-size:11px;border-bottom:1px solid #1e1814}
+.spell-name{color:#eed8b0;font-weight:600}
+.spell-type{color:#687}
+</style>
+</head>
+<body>
+<h1 id="mod-title">博德之门：坠入阿弗纳斯</h1>
+<div class="sub">小队角色卡</div>
+<div id="root"></div>
+<script>
+var CHARS = [];  /* 角色数据由 live_party.json 提供。发布时必须清空，禁止嵌入测试数据 */
+
+function abMod(n){var m=Math.floor((n-10)/2);return m>=0?'+'+m:''+m}
+
+function render(p){
+  var s=p.stats||{};var hp=p.hp||{};var sc=p.spellcasting||{};
+  var keys=["力量","敏捷","体质","智力","感知","魅力"];
+  var stHTML='';for(var i=0;i<keys.length;i++){stHTML+='<div class="ability-row"><span class="ab">'+keys[i]+'</span><span class="val">'+(s[keys[i]]||10)+'</span><span class="mod">'+abMod(s[keys[i]]||10)+'</span></div>';}
+  var svHTML='';for(var i=0;i<keys.length;i++){var v=(p.saves||{})[keys[i]];if(v===undefined)v=abMod(s[keys[i]]||10);else v=(v>=0?'+':'')+v;svHTML+='<div class="sv-row"><span>'+keys[i][0]+'</span><span'+(parseInt(v)>0?' style="color:#5b8;font-weight:700"':'')+'>'+v+'</span></div>';}
+  var skHTML='';for(var i=0;i<(p.skills||[]).length;i++){var sk=p.skills[i];skHTML+='<div class="sv-row"><span'+(sk.expertise?' style="color:#7da;font-weight:700"':sk.prof?' style="color:#5b8;font-weight:700"':'')+'>'+(sk.expertise?'* ':sk.prof?'o ':'')+sk.name+'</span><span>'+(sk.mod>=0?'+':'')+sk.mod+'</span></div>';}
+  var resHTML='';for(var i=0;i<(p.resources||p.res||[]).length;i++){var r=(p.resources||p.res||[])[i];resHTML+='<div class="res-item"><span class="rn">'+r.name+'</span><span class="rv">'+r.val+'</span></div>';}
+  var atkHTML='';for(var i=0;i<(p.attacks||[]).length;i++){var a=p.attacks[i];atkHTML+='<tr><td>'+a.name+'</td><td>'+a.bonus+'</td><td>'+a.dmg+'</td><td style="color:#888">'+(a.note||'')+'</td></tr>';}
+  var splHTML='';if(p.spells&&p.spells.length>0){splHTML+='<div style="color:#9ab;font-size:11px;margin-bottom:4px">'+sc.stat+' | +'+sc.atk+' | DC'+sc.dc+'</div>';for(var li=0;li<10;li++){var lvsp=p.spells.filter(function(x){return x.level==li;});if(lvsp.length==0)continue;splHTML+='<div class="spell-lvl">'+(li==0?'--- 戏法 ---':'--- '+li+'环 ---')+'</div>';for(var si=0;si<lvsp.length;si++){splHTML+='<div class="spell-row"><span class="spell-name">'+lvsp[si].name+'</span></div>';}}}
+  var eqHTML='';for(var i=0;i<(p.equipped||[]).length;i++){eqHTML+='<div class="eq-row"><span class="eq-slot">['+p.equipped[i].slot+']</span> '+p.equipped[i].name+'</div>';}
+  var bpHTML='';if(p.backpack&&p.backpack.length>0){bpHTML='<ul class="items-list">'+p.backpack.map(function(x){return '<li>'+x+'</li>';}).join('')+'</ul>';}
+  var featHTML=(p.features||[]).map(function(f){return '<span class="feature-tag">'+f+'</span>';}).join('');
+  return '<div class="card"><div class="card-header"><div class="h-row"><div><div class="name">'+p.name+'</div><div class="race-cls">'+(p.race?p.race+' ':'')+p.class+(p.subclass?' ['+p.subclass+']':'')+' Lv.'+p.level+'</div><div class="ac-detail">AC '+p.ac+'</div></div><div style="text-align:right"><div class="hp-big">'+(hp.current||0)+'</div><div class="hp-label">/'+(hp.max||0)+' HP</div></div></div></div><div class="pad"><div class="section-title">属性</div>'+stHTML+'<div class="section-title">豁免</div>'+svHTML+'<div class="prof-box"><div class="big">+'+(p.proficiency||2)+'</div><div class="lbl">熟练加值</div></div><div class="section"><div class="section-title">技能</div><div class="skill-grid">'+skHTML+'</div></div><div class="section"><div class="section-title">资源</div>'+resHTML+'</div><div class="section"><div class="section-title">可用动作</div><table class="attacks-table"><tr><th>名称</th><th>加值</th><th>伤害</th><th>备注</th></tr>'+atkHTML+'</table>'+(splHTML?'<div style="margin-top:8px">'+splHTML+'</div>':'')+'</div>'+(eqHTML?'<div class="section"><div class="section-title">装备</div>'+eqHTML+'</div>':'')+'<div class="section"><div class="section-title">特征</div>'+featHTML+'</div>'+(bpHTML?'<div class="section"><div class="section-title">背包</div>'+bpHTML+'</div>':'')+'<div class="section"><div class="section-title">物品</div><div class="gear-list">'+(p.gear||'')+'</div></div></div></div>';
+}
+
+function showEmptyState() {
+  var h='<div style="text-align:center;padding:80px 20px;color:#887766">';
+  h+='<div style="font-size:48px;margin-bottom:16px">[DM]</div>';
+  h+='<div style="font-size:20px;color:#bba;margin-bottom:12px">尚未加载角色数据</div>';
+  h+='<div style="font-size:14px;line-height:1.8">开始游戏后，角色卡会自动显示在这里。<br>如果已有存档，请先加载存档。</div>';
+  h+='</div>';
+  document.getElementById("root").innerHTML = h;
+}
+
+function renderAll() {
+  if(CHARS.length===0) { showEmptyState(); return; }
+  var html='<div class="all-4up">';
+  for(var i=0;i<CHARS.length;i++) html+=render(CHARS[i]);
+  html+='</div>';
+  document.getElementById("root").innerHTML = html;
+}
+
+renderAll();
+</script>
+
 <script>
-var data = [{"name": "老白", "race": "木精灵", "class": "游荡者", "subclass": "刺客", "level": 5, "hp": {"current": 37, "max": 37, "temp": 0}, "ac": 15, "acDetail": "12(+1镶钉)+5(敏)=AC17", "initiative": 5, "speed": 35, "proficiency": 3, "xp": {"current": 1495, "toNext": 7500}, "stats": {"力量": 10, "敏捷": 20, "体质": 12, "智力": 13, "感知": 14, "魅力": 10}, "saves": {}, "skills": [], "resources": [{"name": "偷袭", "val": "3d6"}, {"name": "不羁闪避", "val": "反应伤害减半"}, {"name": "暗杀", "val": "突袭自动暴击"}], "features": ["刺客Lv5", "不羁闪避", "偷袭3d6", "暗杀"], "attacks": [{"name": "提亚玛特之牙(+1)", "bonus": "+8", "dmg": "1d6+5+酸1d6", "note": "灵巧·轻型"}, {"name": "+1暗青龙匕", "bonus": "+9", "dmg": "1d4+5+光耀1d6", "note": "灵巧·回返"}], "spells": [], "spellcasting": {}, "spellSlots": {}, "equipped": [{"slot": "主手", "name": "提亚马特之牙(+1)", "bonus": "攻击+8/伤害1d6+5+酸1d6"}, {"slot": "副手", "name": "+1暗青龙匕(回返)", "bonus": "攻击+9/伤害1d4+5+光耀1d6"}, {"slot": "远程", "name": "轻型十字弓", "bonus": "攻击+8/伤害1d8+4"}, {"slot": "护甲", "name": "+1镶钉皮甲", "bonus": "AC12+敏5"}, {"slot": "斗篷", "name": "渡鸦斗篷", "bonus": "变形渡鸦"}, {"slot": "靴子", "name": "影踪靴", "bonus": "潜行优势"}, {"slot": "饰品", "name": "防护护符", "bonus": "防护"}, {"slot": "饰品", "name": "抵御之带扣", "bonus": "火焰豁免优势"}, {"slot": "饰品", "name": "班恩之拳徽章", "bonus": "焰拳身份"}], "backpack": ["+1暗青龙匕(回返)", "箭袋", "祝圣箭x20", "盗贼工具", "易容工具", "金怀表", "班恩之拳徽章", "圣水x2", "防御护腕(备用)", "黄玉元素宝石", "高等治疗药水"], "armor": "皮甲(AC14)", "gear": "450gp 132sp 噩梦粉尘 蛇戒(40gp) 魔鬼牙x12 灵魂币x3 蓝宝石项圈(250gp)"}, {"name": "伊索尔德·铁誓", "race": "人类", "class": "圣武士", "subclass": "奉献之誓", "level": 5, "hp": {"current": 44, "max": 44, "temp": 0}, "ac": 20, "acDetail": "17(+1链甲)+2(盾)+1(防御)=AC20", "initiative": 0, "speed": 30, "proficiency": 3, "xp": {"current": 1495, "toNext": 7500}, "stats": {"力量": 16, "敏捷": 10, "体质": 14, "智力": 8, "感知": 12, "魅力": 18}, "saves": {}, "skills": [], "resources": [{"name": "至圣斩", "val": "3次/日"}, {"name": "圣疗", "val": "20/20"}], "features": ["奉献之誓Lv5", "额外攻击", "至圣斩", "圣疗"], "attacks": [{"name": "黑刃Blackrazor", "bonus": "+9", "dmg": "2d6+6", "note": "+3神器·吞噬灵魂"}, {"name": "黎光长剑(+1)+盾", "bonus": "+7", "dmg": "1d10+4", "note": "单手+盾AC20"}], "spells": [{"level": 1, "name": "神恩", "effect": "武器+1d4光耀", "type": "无需检定", "focus": true}, {"level": 1, "name": "命令术", "effect": "1词命令", "type": "感知豁免", "focus": false}], "spellcasting": {"stat": "魅力", "atk": "+7", "dc": 15}, "spellSlots": {"1": 4, "2": 2}, "equipped": [{"slot": "主手", "name": "黑刃Blackrazor(+3)", "bonus": "攻击+9/伤害2d6+5,免疫魅惑恐慌,盲视30尺"}, {"slot": "副手", "name": "黯光长剑(+1)+盾", "bonus": "攻击+7/伤害1d10+5,AC+2"}, {"slot": "护甲", "name": "+1链甲", "bonus": "AC17"}, {"slot": "圣徽", "name": "提尔圣徽", "bonus": "施法法器"}, {"slot": "戒指", "name": "焰护之戒", "bonus": "火焰伤害减半"}], "backpack": ["汲命弯刃刀", "夜风+1长剑(备选)", "牧师工具包", "口粮x5", "水袋", "萨拉玛拉银钥(已用)", "《堕落者名录》"], "armor": "+1链甲+盾(AC20)", "gear": "15gp 铸盾协议副本 埃尔托瑞尔转让契约 塔维斯(囚犯)"}, {"name": "莉莉安·晨祷", "race": "半精灵", "class": "牧师", "subclass": "黎明之主", "level": 5, "hp": {"current": 33, "max": 33, "temp": 0}, "ac": 17, "acDetail": "鳞甲AC14+盾+2+盔帽+1=AC17", "initiative": 0, "speed": 25, "proficiency": 3, "xp": {"current": 1495, "toNext": 7500}, "stats": {"力量": 14, "敏捷": 10, "体质": 14, "智力": 10, "感知": 18, "魅力": 12}, "saves": {}, "skills": [], "resources": [{"name": "引导神力", "val": "2/短休"}, {"name": "法术位(V1)", "val": "4x1环"}, {"name": "法术位(V2)", "val": "3x2环"}, {"name": "法术位(V3)", "val": "2x3环"}], "features": ["黎明之主Lv5", "引导神力", "至恶护符"], "attacks": [{"name": "+1硬头锤", "bonus": "+5", "dmg": "1d6+3", "note": "近战"}, {"name": "圣火术", "bonus": "DC15敏", "dmg": "1d8光耀", "note": "120尺·戏法"}], "spells": [{"level": 0, "name": "圣火术", "effect": "1d8光耀伤,120尺", "type": "敏捷豁免", "focus": false}, {"level": 0, "name": "引导闪光", "effect": "创造光源,触及", "type": "无需检定", "focus": false}, {"level": 1, "name": "疗伤术", "effect": "1d8+4治疗", "type": "无需检定", "focus": false}, {"level": 1, "name": "治愈真言", "effect": "1d4+4治疗,附赠", "type": "无需检定", "focus": false}, {"level": 1, "name": "祝福术", "effect": "三项检定+d4", "type": "无需检定", "focus": true}, {"level": 2, "name": "次级复原", "effect": "解除疾病/中毒/麻痪", "type": "无需检定", "focus": false}, {"level": 2, "name": "灵体武器", "effect": "1d8+3力场,附赠", "type": "近战攻击", "focus": false}, {"level": 3, "name": "十字军披风", "effect": "队友+1d4光耀", "type": "无需检定", "focus": true}, {"level": 3, "name": "移除诅咒", "effect": "解除诅咒", "type": "无需检定", "focus": false}], "spellcasting": {"stat": "感知", "atk": "+7", "dc": 15}, "spellSlots": {"1": 4, "2": 3, "3": 2}, "equipped": [{"slot": "武器", "name": "+1硬头锤(晨曦之光)", "bonus": "攻击+5/伤害1d6+3"}, {"slot": "护甲", "name": "鳞甲", "bonus": "AC14"}, {"slot": "副手", "name": "隐藏领主之盾(+2·加葛斯)", "bonus": "AC+2,月检DC15"}, {"slot": "饰品", "name": "至恶护符(传说)", "bonus": "法术攻击+2,万物终焉DC20"}, {"slot": "头饰", "name": "守护盔帽", "bonus": "AC+1"}, {"slot": "靴子", "name": "飞翼之靴", "bonus": "飞行30尺"}, {"slot": "戒指", "name": "海姆圣徽戒指", "bonus": "不死感知"}, {"slot": "圣徽", "name": "黎明之主圣徽", "bonus": "施法法器"}], "backpack": ["黎明驱逐者之盾(备用)", "医疗包", "治疗药水x6", "圣水x5", "口粮x5"], "armor": "鳞甲+隐藏领主之盾(AC17)", "gear": "10gp 噩梦粉尘 24gp 燻犀术卷轴"}, {"name": "科林·霜风", "race": "高等精灵", "class": "法师", "subclass": "塑能师", "level": 5, "hp": {"current": 27, "max": 27, "temp": 0}, "ac": 12, "acDetail": "10+2(敏)+2(防护护腕)=AC14, 法师护甲15", "initiative": 2, "speed": 30, "proficiency": 3, "xp": {"current": 1495, "toNext": 7500}, "stats": {"力量": 8, "敏捷": 14, "体质": 14, "智力": 18, "感知": 12, "魅力": 10}, "saves": {}, "skills": [], "resources": [{"name": "奥术恢复", "val": "1/日"}, {"name": "法术位(V1)", "val": "4x1环"}, {"name": "法术位(V2)", "val": "3x2环"}, {"name": "法术位(V3)", "val": "2x3环"}], "features": ["塑能师Lv5", "强力戏法", "强效戏法"], "attacks": [{"name": "火焰箭", "bonus": "+9", "dmg": "1d10+4火", "note": "戏法·强效+4"}, {"name": "火球术(V3)", "bonus": "DC15敏", "dmg": "8d6火", "note": "20尺半径"}, {"name": "闪电束(V3)", "bonus": "DC15敏", "dmg": "8d6电", "note": "100尺线形"}], "spells": [{"level": 0, "name": "火焰箭(强效)", "effect": "1d10+4火伤", "type": "远程攻击", "focus": false}, {"level": 0, "name": "法师之手", "effect": "遥控物件30尺", "type": "无需检定", "focus": false}, {"level": 1, "name": "魔法飞弹", "effect": "3x(1d4+1)必中", "type": "无需检定", "focus": false}, {"level": 1, "name": "护盾术", "effect": "AC+5一轮", "type": "无需检定", "focus": false}, {"level": 2, "name": "灼热射线", "effect": "3x2d6火伤", "type": "远程攻击", "focus": false}, {"level": 2, "name": "粉碎音波", "effect": "3d8鸣雷,10尺半径", "type": "体质豁免", "focus": false}, {"level": 3, "name": "火球术", "effect": "8d6火,20尺半径", "type": "敏捷豁免", "focus": false}, {"level": 3, "name": "闪电束", "effect": "8d6电,100尺线", "type": "敏捷豁免", "focus": false}, {"level": 3, "name": "加速术", "effect": "+1打/AC/速,专注", "type": "无需检定", "focus": true}], "spellcasting": {"stat": "智力", "atk": "+9", "dc": 15}, "spellSlots": {"1": 4, "2": 3, "3": 2}, "equipped": [{"slot": "武器", "name": "炎语法杖", "bonus": "火焰法术命中+1"}, {"slot": "护腕", "name": "防护护腕", "bonus": "AC+2"}, {"slot": "戒指", "name": "指温抗性戒指", "bonus": "火焰减半"}], "backpack": ["法师杖", "法术反制卷轴x1", "奥术法器", "白板匕首", "学者包", "法术书(全17个法术)"], "armor": "法师护甲(AC15)", "gear": "12gp 博德下水道地图 炼狱谜盒 焰拳通行令"}];
-
-var CHARS = [
-  {
-    "name":"老白干一杯","race":"木精灵","cls":"游荡者","sub":"刺客",
-    "lv":6,"hp":44,"mhp":44,"ac":17,"acDetail":"12(镶钉+1)+4(敏捷)",
-    "init":4,"spd":35,"prof":4,"xp":8042,"mxp":14000,
-    "stats":{"力量":8,"敏捷":18,"体质":14,"智力":10,"感知":14,"魅力":12},
-    "saves":{"力量":0,"敏捷":7,"体质":3,"智力":3,"感知":5,"魅力":2},
-    "skills":[
-      {"name":"运动","prof":false,"mod":-1},{"name":"特技","prof":false,"mod":4},
-      {"name":"巧手","prof":true,"mod":7},{"name":"隐匿","prof":true,"expertise":true,"mod":10},
-      {"name":"调查","prof":false,"mod":2},{"name":"察觉","prof":true,"expertise":true,"mod":8},
-      {"name":"洞悉","prof":false,"mod":2},{"name":"游说","prof":false,"mod":1}
-    ],
-    "res":[
-      {"name":"偷袭","val":"3d6"},{"name":"灵巧动作","val":"疾走/撤离/躲藏"},
-      {"name":"不羁闪避","val":"反应伤害减半"},{"name":"先攻优势","val":"对抗未行动者"},
-      {"name":"暗杀","val":"突袭自动暴击"}
-    ],
-    "features":["刺客Lv6","专家(隐匿/察觉)","防御式决斗(反应+2AC)","灵巧动作","不羁闪避","偷袭3d6","潜行+10","察觉+8","暗杀"],
-    "attacks":[
-      {"name":"提亚马特之牙(+1)","bonus":"+8","dmg":"1d4+4+酸1d6+偷袭3d6","note":"灵巧·轻型"},
-      {"name":"+1暗青龙匕(副手)","bonus":"+9","dmg":"1d4+5+光耀1d6(邪魔)","note":"灵巧·回返"},
-      {"name":"轻型十字弓(祝圣箭)","bonus":"+8","dmg":"1d8+4+光耀1d6(邪魔)","note":"80/320"},
-      {"name":"汲命弯刃刀","bonus":"+8","dmg":"1d10+4+黯蚀1d6","note":"灵巧·吸血"}
-    ],
-    "items":[
-      "提亚马特之牙(+1)","汲命弯刃刀","+1暗青龙匕(回返)","轻型十字弓(祝圣箭×20)","箭袋",
-      "盗贼工具","易容工具","金怀表","防护护符","渡鸦斗篷","抵御之带扣(火免豁免优)",
-      "班恩之拳徽章","影踪靴(潜行优势)","圣水x2","+1镶钉皮甲(已穿)","防御护腕(备用)",
-      "黄玉元素宝石(召唤土元素)","高等治疗药水(4d4+4)"
-    ],
-    "armor":"+1镶钉皮甲",
-    "gear":"450gp 132sp · 噩梦粉尘 · 蛇戒(40gp) · 魔鬼牙x12 · 灵魂币x3 · 蓝宝石项圈(250gp)"
-  },
-  {
-    "name":"伊索尔德·铁誓","race":"人类","cls":"圣武士","sub":"奉献之誓",
-    "lv":6,"hp":52,"mhp":52,"ac":20,"acDetail":"17(+1链甲)+2(盾)+1(防御战斗)=20",
-    "init":0,"spd":40,"prof":4,"xp":8042,"mxp":14000,
-    "stats":{"力量":16,"敏捷":10,"体质":14,"智力":8,"感知":12,"魅力":16},
-    "saves":{"力量":6,"敏捷":1,"体质":3,"智力":0,"感知":2,"魅力":6},
-    "skills":[
-      {"name":"运动","prof":true,"mod":6},{"name":"威吓","prof":true,"mod":6},
-      {"name":"游说","prof":true,"mod":6},{"name":"洞悉","prof":true,"mod":4},
-      {"name":"宗教","prof":false,"mod":1},{"name":"历史","prof":false,"mod":1}
-    ],
-    "res":[
-      {"name":"圣疗","val":"25/25"},{"name":"至圣斩","val":"3/日"},
-      {"name":"法术位","val":"4x1环+2x2环"},{"name":"防护光环","val":"10尺·豁免+3"},
-      {"name":"黑刃·免疫","val":"魅惑/恐慌"},{"name":"黑刃·盲视","val":"30尺"},
-      {"name":"吞噬灵魂","val":"击杀获临时HP"},{"name":"黑刃·加速","val":"1/日"}
-    ],
-    "features":["奉献之誓Lv6","防护光环+3","重甲大师(非魔BPS-2)","防御战斗(AC+1)","额外攻击(2次)","圣疗25","至圣斩(1/2环+3d8对不死)","黑刃免疫/盲视","黑刃加速(1/日)"],
-    "attacks":[
-      {"name":"黑刃Blackrazor","bonus":"+9","dmg":"2d6+5","note":"+3神器·吞噬灵魂"},
-      {"name":"黯光长剑(+1)+盾","bonus":"+7","dmg":"1d10+5","note":"单手+盾AC20"},
-      {"name":"汲命弯刃刀","bonus":"+7","dmg":"1d10+5+黯蚀1d6","note":"备用·吸血"}
-    ],
-    "items":[
-      "黑刃Blackrazor(+3神器)","黯光长剑(+1)","汲命弯刃刀","夜风+1长剑(备选)","盾牌","+1链甲",
-      "提尔圣徽","牧师工具包","口粮x5","水袋","焰护之戒(火抗)","萨拉玛拉银钥","《堕落者名录》"
-    ],
-    "armor":"+1链甲+盾",
-    "gear":"15gp · 铸盾协议副本 · 埃尔托瑞尔转让契约 · 塔维斯(囚犯)"
-  },
-  {
-    "name":"莉莉安·晨祷","race":"半精灵","cls":"牧师","sub":"黎明之主",
-    "lv":6,"hp":40,"mhp":40,"ac":18,"acDetail":"10+1(敏)+4(鳞甲)+2(隐盾)+1(盔帽)=18",
-    "init":1,"spd":30,"prof":4,"xp":8042,"mxp":14000,
-    "stats":{"力量":8,"敏捷":12,"体质":14,"智力":12,"感知":16,"魅力":14},
-    "saves":{"力量":0,"敏捷":2,"体质":3,"智力":2,"感知":6,"魅力":3},
-    "skills":[
-      {"name":"医疗","prof":true,"mod":6},{"name":"洞悉","prof":true,"mod":6},
-      {"name":"宗教","prof":true,"mod":4},{"name":"历史","prof":false,"mod":1}
-    ],
-    "res":[
-      {"name":"引导神力","val":"3/短休"},{"name":"法术位(V1)","val":"4x1环"},
-      {"name":"法术位(V2)","val":"3x2环"},{"name":"法术位(V3)","val":"3x3环"},
-      {"name":"至恶·攻/DC","val":"+2"},{"name":"至恶·触碰","val":"8d6黯蚀/日"},
-      {"name":"至恶·终结","val":"DC20超度"}
-    ],
-    "features":["黎明之主Lv6","战地施法者","引导神力(3/短休):黎明之火","驱散不死(CR1/2摧毁)","黎明之盾(微光·对不死AC+3)","十字军披风(+1d4光耀)","移除诅咒","昼明术","防死结界"],
-    "attacks":[
-      {"name":"+1硬头锤(晨曦之光)","bonus":"+5","dmg":"1d6+3","note":"近战·对不死发光"},
-      {"name":"神圣之火","bonus":"DC14敏","dmg":"1d8光耀","note":"120尺·戏法"},
-      {"name":"灵体武器(V2)","bonus":"+6附赠","dmg":"1d8+3力场","note":"专注·100尺"},
-      {"name":"黎明之火","bonus":"DC14感","dmg":"1d10+3光耀+目盲","note":"30尺锥形"}
-    ],
-    "items":[
-      "隐藏领主之盾(+2·加葛斯)","黎明驱逐者之盾(备用)","+1硬头锤(晨曦之光)","鳞甲",
-      "海姆圣徽戒指(不死感知)","黎明之主圣徽","至恶护符(传说·已同调)","守护盔帽(AC+1·已戴)",
-      "智力头冠(智力19·可换戴)","飞翼之靴(飞行30尺)","医疗包","治疗药水x6","圣水x5","口粮x5"
-    ],
-    "armor":"鳞甲+隐藏领主之盾+守护盔帽",
-    "gear":"10gp · 噩梦粉尘 · 24gp · 燔祭术卷轴"
-  },
-  {
-    "name":"科林·霜风","race":"高等精灵","cls":"法师","sub":"塑能师",
-    "lv":6,"hp":32,"mhp":32,"ac":14,"acDetail":"10+2(敏)+2(防护护腕)=14",
-    "init":2,"spd":30,"prof":4,"xp":8042,"mxp":14000,
-    "stats":{"力量":8,"敏捷":14,"体质":12,"智力":18,"感知":10,"魅力":12},
-    "saves":{"力量":0,"敏捷":3,"体质":2,"智力":7,"感知":1,"魅力":2},
-    "skills":[
-      {"name":"奥秘","prof":true,"mod":7},{"name":"历史","prof":true,"mod":7},
-      {"name":"调查","prof":true,"mod":7},{"name":"洞悉","prof":false,"mod":0}
-    ],
-    "res":[
-      {"name":"法术位(V1)","val":"4x1环"},{"name":"法术位(V2)","val":"3x2环"},
-      {"name":"法术位(V3)","val":"3x3环"},{"name":"奥术恢复","val":"1/日"}
-    ],
-    "features":["塑能师Lv6","塑能学者(白嫖3塑能)","强力戏法(豁免过半伤)","强效戏法(火焰箭1d10+4)","奥术恢复(3环)"],
-    "attacks":[
-      {"name":"火焰箭(强效)","bonus":"+9","dmg":"1d10+4火","note":"戏法·强效+4"},
-      {"name":"魔法飞弹(V1)","bonus":"必中","dmg":"3x(1d4+1)","note":"120尺"},
-      {"name":"灼热射线(V2)","bonus":"+9","dmg":"3x2d6火","note":"120尺"},
-      {"name":"粉碎音波(V2)","bonus":"DC15体","dmg":"3d8雷鸣","note":"10尺半径·塑能白嫖"},
-      {"name":"火球术(V3)","bonus":"DC15敏","dmg":"8d6火","note":"20尺半径·塑能"},
-      {"name":"闪电束(V3)","bonus":"DC15敏","dmg":"8d6电","note":"100尺线形·塑能"},
-      {"name":"加速术(V3)","bonus":"—","dmg":"+1打+AC+速","note":"专注·3目标"},
-      {"name":"法术反制(V3)","bonus":"—","dmg":"反制法术","note":"反应·60尺"}
-    ],
-    "items":[
-      "法师杖","炎语法杖(火焰+1命中)","指温抗性戒指(火抗)","防护护腕(AC+2)",
-      "法术反制卷轴×1","奥术法器(水晶)","白板匕首","学者包",
-      "法术书(魔法飞弹·燃火术·法师护甲·护盾术·灼热射线·魅惑人类·粉碎音波·彩色光球·龙息术·燃火球·隐形术·镜影术·衰弱射线·火球术·加速术·法术反制·闪电束)"
-    ],
-    "armor":"无(法师护甲15)",
-    "gear":"12gp · 博德下水道地图 · 炼狱谜盒 · 焰拳通行令"
-  }
-];
-
-function abMod(n){var m=Math.floor((n-10)/2);return m>=0?"+"+m:""+m}
-function render(idx){
-  var ch=CHARS[idx];var xpp=Math.min(100,(ch.xp/ch.mxp)*100);
-  var svOrder=["力量","敏捷","体质","智力","感知","魅力"];
-  var svHTML="";var skillHTML="";var resHTML="";var atkHTML="";var featHTML="";
-  for(var si=0;si<svOrder.length;si++){
-    var sk=svOrder[si];var sv=ch.saves[sk];
-    svHTML+='<div class="sv-row"><span>'+sk.substr(0,1)+'</span><span'+(sv>=0?' style="color:#5b8;font-weight:700"':'')+'>'+(sv>=0?"+":"")+sv+'</span></div>';
-  }
-  for(var si=0;si<ch.skills.length;si++){
-    var s=ch.skills[si];var prefix="";var cls="";
-    if(s.expertise){cls=' style="color:#7da;font-weight:700"';prefix="★ ";}
-    else if(s.prof){cls=' style="color:#5b8;font-weight:700"';prefix="● ";}
-    skillHTML+='<div class="sv-row"><span'+cls+'>'+prefix+s.name+'</span><span'+cls+'>'+(s.mod>=0?"+":"")+s.mod+'</span></div>';
-  }
-  for(var ri=0;ri<ch.res.length;ri++){resHTML+='<div class="res-item"><span class="rn">'+ch.res[ri].name+'</span><span class="rv">'+ch.res[ri].val+'</span></div>';}
-  for(var ai=0;ai<ch.attacks.length;ai++){var a=ch.attacks[ai];atkHTML+='<tr><td>'+a.name+'</td><td>'+a.bonus+'</td><td>'+a.dmg+'</td><td style="color:#888">'+(a.note||"")+'</td></tr>';}
-  featHTML=ch.features.map(function(f){return '<span class="feature-tag">'+f+'</span>';}).join("");
-  var itemHTML=ch.items.map(function(it){return '<li>'+it+'</li>';}).join("");
-  return '<div class="card">'+
-    '<div class="card-header"><div class="h-row">'+
-      '<div><div class="name">'+ch.race+' · '+ch.name+'</div>'+
-      '<div class="race-cls">'+ch.cls+(ch.sub?' ['+ch.sub+']':'')+' Lv.'+ch.lv+'</div>'+
-      '<div class="ac-detail">AC '+ch.ac+' — '+ch.acDetail+'</div></div>'+
-      '<div style="text-align:right;flex-shrink:0"><div class="hp-big">'+ch.hp+'</div>'+
-      '<div class="hp-label">/'+ch.mhp+' HP</div>'+
-      '<div style="color:#888;font-size:10px;margin-top:4px">Init +'+ch.init+' · Spd '+ch.spd+'</div></div>'+
-    '</div><div class="xp-bar"><div class="xp-fill" style="width:'+xpp+'%"></div></div>'+
-    '<div style="display:flex;justify-content:space-between;font-size:10px;color:#888;margin-top:2px">'+
-      '<span>'+ch.armor+'</span><span>EXP '+ch.xp+'/'+ch.mxp+'</span></div></div>'+
-    '<div class="content"><div class="left-col">'+
-      '<div class="stat-block"><div class="stat-title">✦ 属性</div>'+
-      Object.keys(ch.stats).map(function(k){return '<div class="ability-row"><span class="ab">'+k+'</span><span class="val">'+ch.stats[k]+'</span><span class="mod">'+abMod(ch.stats[k])+'</span></div>';}).join("")+'</div>'+
-      '<div class="stat-block"><div class="stat-title">✦ 豁免</div>'+svHTML+'</div>'+
-      '<div class="prof-box"><div class="big">+'+(ch.prof)+'</div><div class="lbl">熟练加值</div></div></div>'+
-    '<div class="right-col">'+
-      '<div class="section"><div class="section-title">技能</div><div class="skill-grid">'+skillHTML+'</div></div>'+
-      '<div class="section"><div class="section-title">资源</div>'+resHTML+'</div>'+
-      '<div class="section"><div class="section-title">攻击</div><table class="attacks-table"><tr><th>名称</th><th>加值</th><th>伤害</th><th>备注</th></tr>'+atkHTML+'</table></div>'+
-      '<div class="section"><div class="section-title">特征</div>'+featHTML+'</div>'+
-      '<div class="section"><div class="section-title">装备 <span class="item-count">('+ch.items.length+')</span></div><ul class="items-list">'+itemHTML+'</ul></div>'+
-      '<div class="section"><div class="section-title">物品/资金</div><div class="gear-list">'+ch.gear+'</div></div>'+
-    '</div></div></div>';
-}
-function renderAll(){
-  var html='<div class="all-4up">';for(var i=0;i<CHARS.length;i++)html+=render(i);html+='</div>';
-  document.getElementById("root").innerHTML=html;
-}
-var emojis=["🗡️","⚔️","✨","🔮"];
-var tabHTML='<button class="tab tab-all active" data-idx="all">👥全员</button>';
-for(var i=0;i<CHARS.length;i++)tabHTML+='<button class="tab" data-idx="'+i+'">'+emojis[i]+' '+CHARS[i].name.split("·")[0]+'</button>';
-document.getElementById("tabs").innerHTML=tabHTML;renderAll();
-document.getElementById("tabs").addEventListener("click",function(e){
-  var btn=e.target.closest(".tab");if(!btn)return;
-  var idx=btn.getAttribute("data-idx");
-  document.querySelectorAll(".tab").forEach(function(t){t.classList.remove("active");});btn.classList.add("active");
-  document.getElementById("root").innerHTML=idx==="all"?renderAll():render(parseInt(idx));
-});
+(function(){
+  var h1=document.getElementById("mod-title");
+  if(!h1)return;
+  var xhr=new XMLHttpRequest();
+  try {
+    xhr.open("GET", "live_party.json", true);
+    xhr.onload=function(){
+      try {
+        var d=JSON.parse(xhr.responseText);
+        if(d.module) h1.textContent=d.module;
+      } catch(e){}
+    };
+    xhr.send();
+  } catch(e){}
+})();
 </script>
-</body>
+</body>
 </html>

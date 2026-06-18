@@ -1,4 +1,77 @@
 # DM 城主系统更新日志
+## 1.1.8 (2026-06-09)
+
+### 角色卡模板清理
+- **移除旧测试数据**：party-sheet.html 中 embedded 的 4 个旧角色数据（老白/伊索尔德/莉莉安/科林）彻底清除
+- **空状态引导**：无角色数据时显示引导页面，提示用户开始游戏或加载存档
+- **双源同步**：workspace 和 DMskill/references/ 两个副本一致
+
+### 开发规则补充
+- **DM_DEV_GUIDE.md §8.3**：新增发布前四步检查链（解压验证、路径扫描、旧数据清理、依赖验证）
+
+## 1.1.7 (2026-06-09)
+
+### 校验功能移至引擎层
+- **`dnd_engine/verify.py` 新建**：`verify_environment()` 纯函数，不依赖 FastAPI 服务
+- **CLI 修正**：`cmd_verify()` 从 HTTP 调用改为直接调用 `verify_environment()`
+- **DM_RULES.md 规则21 修正**：`GET /api/system/verify` → `dnd_engine.verify.verify_environment()`
+- **修复**：玩家在无 API 服务环境下调用 `/verify` 不再报错
+
+### 包完整性修复
+- 校验函数随引擎源码打包，解压即用
+- DMskill 重构建（23 个 .py，新增 verify.py）
+
+## 1.1.5 (2026-06-09)
+
+### 零安装体验
+- **引擎源码内置**：dnd-engine 直接打包在 zip 中，解压即用，无需 pip install
+- **code/ 目录移除**：旧代码库全部删除（25 个 .py 已弃用），不再包含在 DMskill 中
+- **36 处路径引用迁移**：DM_RULES.md、SKILL.md、DM_TEMPLATES.md、DM_DEV_GUIDE.md、ECHO_ARC.md 中所有 `code/` 引用改为 `dnd-engine/src/dnd_engine/`
+- **安装指引精简**：从 5 步缩至 3 步（解压 -> 放规则书和模组 -> /verify）
+
+### ClawHub 合规修复
+- **DMskill 清理**：移除 .git 目录、移除安装脚本、移除 Docker 文件
+- **换行符修复**：消除 `
+
+
+
+` 多余回车导致的显示异常
+- **SKILL.md 标准化**：按 AgentSkills 规范保留 metadata，移除所有外部依赖声明
+
+## 1.1.5 (2026-06-09)
+
+### 零安装体验
+- **引擎源码内置**：dnd-engine 直接打包在 zip 中，解压即用，无需 pip install
+- **code/ 目录移除**：旧代码库全部删除（25 个 .py 已弃用），不再包含在 DMskill 中
+- **36 处路径引用迁移**：DM_RULES.md、SKILL.md、DM_TEMPLATES.md、DM_DEV_GUIDE.md、ECHO_ARC.md 中所有 `code/` 引用改为 `dnd-engine/src/dnd_engine/`
+- **安装指引精简**：从 5 步缩至 3 步（解压 -> 放规则书和模组 -> /verify）
+
+### ClawHub 合规修复
+- **DMskill 清理**：移除 .git 目录、移除安装脚本、移除 Docker 文件
+- **换行符修复**：消除 `
+
+
+
+` 多余回车导致的显示异常
+- **SKILL.md 标准化**：按 AgentSkills 规范保留 metadata，移除所有外部依赖声明
+
+## 1.1.5 (2026-06-09)
+
+### 零安装体验
+- **引擎源码内置**：dnd-engine 直接打包在 zip 中，解压即用，无需 pip install
+- **code/ 目录移除**：旧代码库全部删除（25 个 .py 已弃用），不再包含在 DMskill 中
+- **36 处路径引用迁移**：DM_RULES.md、SKILL.md、DM_TEMPLATES.md、DM_DEV_GUIDE.md、ECHO_ARC.md 中所有 `code/` 引用改为 `dnd-engine/src/dnd_engine/`
+- **安装指引精简**：从 5 步缩至 3 步（解压 -> 放规则书和模组 -> /verify）
+
+### ClawHub 合规修复
+- **DMskill 清理**：移除 .git 目录、移除安装脚本、移除 Docker 文件
+- **换行符修复**：消除 `
+
+
+
+` 多余回车导致的显示异常
+- **SKILL.md 标准化**：按 AgentSkills 规范保留 metadata，移除所有外部依赖声明
+
 ## 1.1.4 (2026-06-08)
 
 ### SKILL.md 标准化与优化

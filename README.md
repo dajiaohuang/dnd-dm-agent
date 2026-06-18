@@ -25,16 +25,21 @@ D&D Adapter / Tools
   身份与权限 · 战役作用域 · 状态读写 · 工具调用
         │
         ▼
-D&D Domain Core
-  战役 · 人物卡 · 规则 · 骰子 · 战斗 · 存档 · 审计
+dnd-dm-skill/code
+  唯一规则引擎 · 骰子 · 战斗 · 角色 · 存档
         │
         ▼
-SQLite / PostgreSQL
+辅助数据库
+  状态持久化 · 绑定 · 版本 · 审计 · 检索
 ```
 
 当前阶段只迁移数据库系统，尚未迁移旧版模式路由、LLM Loop、API、前端或业务工具。
 
 数据库层位于 `nanobot/dnd/db/`，默认使用 `~/.nanobot/dnd/dnd_dm.db`，也可通过 `DND_DATABASE_URL` 指向其他 SQLite 或 PostgreSQL 数据库。
+
+规则和机械计算的唯一实现来自内置 `nanobot/skills/dnd-dm/code/`，其同步基线为
+`D:\repo\dnd-dm-skill\code`。数据库不重新实现命中、伤害、升级、骰子或存档规则，
+只持久化该引擎产生的输入、输出和状态。
 
 当前 Schema 按 dnd-dm-skill 的运行文件重构：
 
@@ -49,9 +54,19 @@ SQLite / PostgreSQL
 | `scenes_index.json`、场景缓存 | `scene_indexes`、`scene_states` |
 | SRD 与规则书 | `rule_sources`、`rule_chunks` |
 | 骰点与工具执行 | `dice_rolls`、`tool_audits` |
+| 状态变更历史 | `state_revisions` |
 | QQ 等渠道绑定 | `channel_bindings` |
 
 复杂状态采用带 `schema_version` 和 `state_version` 的 JSON 聚合；角色 HP、等级、AC 等高频字段单独成列。数据库升级由内置 Alembic Revision 管理。
+
+审计表记录调用者、`code/` 函数、参数、结果、执行前后状态、耗时和状态版本。
+`state_revisions` 采用只追加记录，用于解释状态变化、排查重复扣血并为后续撤销提供依据，
+但不参与 D&D 规则计算。
+
+数据库提供基于审计的多步撤销。默认单次最多撤销最近 20 次可逆操作，可通过
+`DND_AUDIT_UNDO_LIMIT` 调整。撤销按时间从新到旧执行，恢复完整引擎 JSON 状态，
+并继续递增 `state_version`。原审计不会被修改；每次撤销都会新增 `dnd_undo` 审计和
+反向 `state_revision`，同一操作不能重复撤销。
 
 沿用 `old_ver` 的数据库核心设计：
 

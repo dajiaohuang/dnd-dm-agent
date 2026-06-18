@@ -18,6 +18,8 @@ class Campaign(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     system_version: Mapped[str] = mapped_column(String, default="D&D 5e 2024")
     module_name: Mapped[str | None] = mapped_column(String)
+    engine_source: Mapped[str] = mapped_column(String, default="dnd-dm-skill/code")
+    engine_version: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="active", index=True)
     description: Mapped[str | None] = mapped_column(Text)
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

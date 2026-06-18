@@ -1,6 +1,6 @@
 """Public D&D database model surface."""
 
-from nanobot.dnd.db.models.audit import DiceRoll, ToolAudit
+from nanobot.dnd.db.models.audit import DiceRoll, StateRevision, ToolAudit
 from nanobot.dnd.db.models.campaign import Campaign, Character, Party, WorldState
 from nanobot.dnd.db.models.integration import ChannelBinding
 from nanobot.dnd.db.models.knowledge import CompendiumEntry, RuleChunk, RuleSource
@@ -24,6 +24,7 @@ __all__ = [
     "RuleSource",
     "SceneIndex",
     "SceneState",
+    "StateRevision",
     "ToolAudit",
     "WorldState",
 ]
