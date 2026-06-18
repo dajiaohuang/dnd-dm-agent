@@ -63,6 +63,7 @@ dependencies = [
     "python-pptx>=1.0.0,<2.0.0",
     "filelock>=3.25.2",
     "boto3>=1.43.0",
+    "sqlalchemy>=2.0.41,<3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -102,6 +103,9 @@ pdf = [
 olostep = [
     "olostep>=0.1.0",
 ]
+dnd-postgres = [
+    "psycopg[binary]>=3.2.9,<4.0.0",
+]
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
@@ -132,8 +136,12 @@ allow-direct-references = true
 [tool.hatch.build]
 include = [
     "nanobot/**/*.py",
+    "nanobot/**/*.sql",
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
+    "nanobot/skills/**/*.json",
+    "nanobot/skills/**/*.html",
+    "nanobot/skills/**/*.py",
     "nanobot/skills/**/*.sh",
     "nanobot/web/dist/**/*",
 ]
@@ -168,6 +176,10 @@ include = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+exclude = [
+    "nanobot/skills/dnd-dm/code",
+    "nanobot/skills/dnd-dm/srd/scripts",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]

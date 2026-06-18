@@ -30,6 +30,14 @@ def _write_skill(
     return path
 
 
+def test_dnd_dm_is_available_as_builtin_skill(tmp_path: Path) -> None:
+    loader = SkillsLoader(tmp_path)
+
+    skills = loader.list_skills(filter_unavailable=False)
+
+    assert any(skill["name"] == "dnd-dm" and skill["source"] == "builtin" for skill in skills)
+
+
 def test_list_skills_empty_when_skills_dir_missing(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()

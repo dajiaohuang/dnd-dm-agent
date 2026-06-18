@@ -272,8 +272,8 @@ def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
     assert "recent question about K8s" in prompt
 
 
-def test_execution_rules_in_system_prompt(tmp_path) -> None:
-    """Execution rules should appear in the system prompt via default SOUL.md."""
+def test_dnd_dm_soul_in_system_prompt(tmp_path) -> None:
+    """The bundled D&D DM persona should appear via the default SOUL.md."""
     from nanobot.utils.helpers import sync_workspace_templates
 
     workspace = _make_workspace(tmp_path)
@@ -281,10 +281,9 @@ def test_execution_rules_in_system_prompt(tmp_path) -> None:
     builder = ContextBuilder(workspace)
 
     prompt = builder.build_system_prompt()
-    assert "single-step tasks" in prompt
-    assert "multi-step tasks" in prompt
-    assert "Read before you write" in prompt
-    assert "verify the result" in prompt
+    assert "明萨拉·班瑞" in prompt
+    assert "地下城主" in prompt
+    assert "规则为信仰，骰子为审判官" in prompt
 
 
 def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
@@ -309,12 +308,12 @@ def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) -> Non
     assert "Message Time" not in prompt
 
 
-def test_default_soul_template_contains_execution_rules() -> None:
-    """Default SOUL.md template must contain execution rules with act/plan layering."""
+def test_default_soul_template_contains_dnd_dm_persona() -> None:
+    """Default SOUL.md template must contain the D&D DM persona."""
     soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")
-    assert "## Execution Rules" in soul
-    assert "single-step tasks" in soul
-    assert "multi-step tasks" in soul
+    assert "# SOUL.md——明萨拉·班瑞·阿弗纳斯的地狱城主" in soul
+    assert "## 核心身份（Core Identity）" in soul
+    assert "## 性格与信条（Personality & Tenets）" in soul
 
 
 def test_channel_format_hint_telegram(tmp_path) -> None:
