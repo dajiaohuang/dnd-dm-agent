@@ -67,6 +67,8 @@ async def lifespan(_: FastAPI):
             config = campaign.config or {}
             if config.get("dice_dm_qq_user_id"):
                 sync_campaign_actor_bindings(db, campaign, str(config["dice_dm_qq_user_id"]))
+    from app.workflows.job_worker import recover_jobs
+    recover_jobs()
     if engine.dialect.name == "postgresql":
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))

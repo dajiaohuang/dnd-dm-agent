@@ -114,6 +114,15 @@ def publish_drafts(db: Session, campaign_id: str, actor_id: str | None = None) -
         else:
             before = serialize(setting)
         proposal = copy.deepcopy(draft.proposal)
+        # Canonicalize the legacy description field before publishing.  Older
+        # tools and subagents used description while CampaignSetting stores
+        # summary + structured content.
+        if "description" in proposal:
+            description = str(proposal.pop("description") or "")
+            proposal.setdefault("summary", description[:500])
+            content = copy.deepcopy(proposal.get("content") or {})
+            content.setdefault("description", description)
+            proposal["content"] = content
         if draft.operation == "archive":
             setting.status = "archived"
         else:

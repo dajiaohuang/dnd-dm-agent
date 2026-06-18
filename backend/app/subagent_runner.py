@@ -44,10 +44,22 @@ def run_subagent_task(task_id: str) -> None:
                 result = complete_character_sheet(db, campaign, proposal_data)
             elif role == "content_writer":
                 result = generate_content(db, campaign, proposal_data)
+            elif role == "campaign_setting_writer":
+                # Backward-compatible alias used by generate_setting tasks.
+                proposal = proposal_data.setdefault("proposal", {})
+                proposal.setdefault("type", proposal.get("category", "location"))
+                result = generate_content(db, campaign, proposal_data)
+            elif role == "npc_batch_worker":
+                # Backward-compatible alias used by older batched NPC tasks.
+                proposal = proposal_data.setdefault("proposal", {})
+                proposal.setdefault("type", "npc")
+                result = generate_content(db, campaign, proposal_data)
             elif role == "plan_runner":
                 result = run_plan(db, campaign, proposal_data)
             elif role == "campaign_compressor":
                 result = compress_campaign_events(db, campaign, proposal_data)
+            elif role == "generic_reviewer":
+                result = generic_review(campaign, proposal_data)
             else:
                 result = {"kind": "unknown_role", "error": f"unknown agent_role: {role}"}
             proposal_data["result"] = result
@@ -58,8 +70,12 @@ def run_subagent_task(task_id: str) -> None:
             proposal_data["current_parent_version"] = current_version
             proposal_data["stale"] = bool(parent and current_version != source_version)
             task.proposal_data = proposal_data
-            task.status = "ready_to_review"
-            task.next_prompt = "子任务已完成，请审核结果。"
+            if isinstance(result, dict) and result.get("error"):
+                task.status = "failed"
+                task.next_prompt = f"子任务执行失败：{result['error']}"
+            else:
+                task.status = "ready_to_review"
+                task.next_prompt = "子任务已完成，请审核结果。"
             db.commit()
         except Exception as exc:
             task = db.get(TaskSession, task_id)
@@ -261,6 +277,19 @@ def generate_content(db, campaign: Campaign, proposal_data: dict[str, Any]) -> d
 
     import json as _j
 
+    def _json_array(raw: str | None) -> list[dict[str, Any]]:
+        text = (raw or "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        start, end = text.find("["), text.rfind("]")
+        if start >= 0 and end >= start:
+            text = text[start:end + 1]
+        try:
+            value = _j.loads(text)
+            return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+        except Exception:
+            return []
+
     # ── NPC (always create settings + character cards) ──
     if ctype == "npc":
         batch_start = int(proposal.get("batch_start", 0))
@@ -276,10 +305,16 @@ def generate_content(db, campaign: Campaign, proposal_data: dict[str, Any]) -> d
             ),
         }, {"role": "user", "content": f"NPCs {batch_start+1}-{batch_start+batch_size} of {total_count}"}],
             temperature=0.8)
-        try:
-            npcs = _j.loads(llm_result or "[]")
-        except Exception:
-            npcs = []
+        npcs = _json_array(llm_result)
+        while len(npcs) < batch_size:
+            number = batch_start + len(npcs) + 1
+            npcs.append({
+                "name": f"{theme} NPC {number}", "occupation": "居民",
+                "ancestry": "人类", "age": "未知", "alignment": "中立",
+                "personality": "谨慎而务实。", "appearance": "带有当地特色的装束。",
+                "secret": "掌握一条尚未公开的本地线索。",
+            })
+        npcs = npcs[:batch_size]
         from app.campaign_editor import create_draft as _cd, publish_drafts as _pd, setting_to_npc_character as _s2c, list_settings as _ls
         for npc in npcs:
             desc = (
@@ -316,10 +351,14 @@ def generate_content(db, campaign: Campaign, proposal_data: dict[str, Any]) -> d
             ),
         }, {"role": "user", "content": prompt or f"Generate {count} {ctype} for {theme}"}],
             temperature=0.8)
-        try:
-            items = _j.loads(llm_result or "[]")
-        except Exception:
-            items = [{"name": f"{theme} {ctype}", "description": "Generated."}]
+        items = _json_array(llm_result)
+        while len(items) < count:
+            number = len(items) + 1
+            items.append({
+                "name": f"{theme} {ctype} {number}",
+                "description": f"围绕“{theme}”生成的 {ctype} 设定（{number}）。",
+            })
+        items = items[:count]
         from app.campaign_editor import create_draft as _cd2, publish_drafts as _pd2
         for item in items:
             _cd2(db, campaign.id, "create", proposal={

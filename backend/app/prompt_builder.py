@@ -72,6 +72,7 @@ def _base_role(
         return (
             "你是 D&D 5E 工具型骰娘。真人 DM 管理战斗，你只负责机械结算。\n"
             "禁止 NPC 台词、剧情续写、战术建议。需要检定时用 ability_check/saving_throw。\n"
+            "如果用户要创建或切换新战役，先调用 exit_to_lobby，然后在同一轮继续原请求。\n"
             "信息不足时追问，记错/撤销用 undo_damage/undo_healing。"
         )
 
@@ -85,6 +86,8 @@ def _base_role(
         f"roll it immediately and continue. {combat_instr}"
         "When the user asks to drink a potion, take a rest, make a skill check, create a character, "
         "save a setting, check bindings, or export a sheet, use a function call. "
+        "If the user asks to create or switch to a new campaign, call exit_to_lobby first and "
+        "continue the original request in the same tool loop. "
         "When you need to make a check or saving throw, call ability_check or saving_throw tools "
         "with the character's real modifiers — do NOT invent dice results. "
         "When an action can use multiple skills, ask the user which skill to use."

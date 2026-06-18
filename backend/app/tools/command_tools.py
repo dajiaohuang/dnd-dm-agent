@@ -487,7 +487,10 @@ COMMAND_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "exit_to_lobby",
-            "description": "退出当前模式，返回游戏外大厅。用户说「退出」「返回大厅」时调用。",
+            "description": (
+                "退出当前游戏/骰娘模式，返回游戏外大厅。"
+                "用户要求创建或切换新战役时必须先调用本工具；切换后在同一轮继续完成原请求。"
+            ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -667,6 +670,95 @@ COMMAND_TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+COMMAND_TOOLS.extend([
+    {
+        "type": "function",
+        "function": {
+            "name": "list_agent_jobs",
+            "description": "查看当前用户的后台生成任务及状态。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_agent_job_result",
+            "description": "读取一个后台任务生成的完整待审核结果。用户问生成了哪些内容时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {"job_id": {"type": "string", "description": "任务ID；不填则读取最近任务"}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "accept_agent_artifact",
+            "description": "接受后台生成结果，并在单个事务中发布设定及创建对应NPC卡。",
+            "parameters": {
+                "type": "object",
+                "properties": {"job_id": {"type": "string", "description": "要接受的任务ID"}},
+                "required": ["job_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reject_agent_artifact",
+            "description": "拒绝后台生成结果，不写入正式设定。",
+            "parameters": {
+                "type": "object",
+                "properties": {"job_id": {"type": "string", "description": "要拒绝的任务ID"}},
+                "required": ["job_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_campaign_settings",
+            "description": "从数据库准确列出当前战役已发布的设定，可按类别筛选。禁止凭记忆编造列表。",
+            "parameters": {
+                "type": "object",
+                "properties": {"category": {"type": "string", "enum": ["npc", "location", "faction", "item", "event"]}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_campaign_setting",
+            "description": "读取指定已发布设定的完整详情。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "setting_id": {"type": "string"},
+                    "name": {"type": "string"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "randomize_character_draft",
+            "description": "随机生成1级角色概念和六项属性；属性使用4d6去最低并写入骰子审计。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "level": {"type": "integer", "minimum": 1, "maximum": 20, "default": 1},
+                    "method": {"type": "string", "enum": ["4d6_drop_lowest"], "default": "4d6_drop_lowest"},
+                },
+                "required": [],
+            },
+        },
+    },
+])
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  HANDLER IMPLEMENTATIONS
@@ -678,6 +770,18 @@ def _ok(narration: str, **kw: Any) -> dict:
 
 def _err(narration: str, **kw: Any) -> dict:
     return {"ok": False, "kind": "tool_result", "narration": narration, "data": kw or {}}
+
+
+def _background_scope(
+    message_context: dict | None, user_id: str, session_id: str | None,
+) -> dict[str, str | None]:
+    context = message_context or {}
+    return {
+        "platform": str(context.get("platform") or "system"),
+        "chat_id": str(context.get("group_id") or "") or None,
+        "owner_user_id": str(context.get("sender_id") or user_id or "") or None,
+        "session_id": session_id,
+    }
 
 
 # ── 基础命令 ──
@@ -905,20 +1009,40 @@ def handle_save_campaign_setting(
         return _err(f"无效的分类：{category}。可选值：npc/location/faction/item/event")
     if not name.strip():
         return _err("需要提供设定名称。")
-    setting = CampaignSetting(
-        id=uid("setting"), campaign_id=campaign.id,
-        category=category, name=name.strip(),
-        summary=(description or "")[:200],
-        content={"description": description or ""},
-        status="published", version=1,
-    )
-    db.add(setting)
+    from sqlalchemy import select as _select
+    from app.db.models import CampaignSettingHistory
+    from app.services import serialize as _serialize
+    clean_name = name.strip()
+    setting = db.scalar(_select(CampaignSetting).where(
+        CampaignSetting.campaign_id == campaign.id,
+        CampaignSetting.category == category,
+        CampaignSetting.name == clean_name,
+    ))
+    before = _serialize(setting) if setting else {}
+    if not setting:
+        setting = CampaignSetting(
+            id=uid("setting"), campaign_id=campaign.id,
+            category=category, name=clean_name, status="published", version=1,
+        )
+        db.add(setting)
+    else:
+        setting.version = (setting.version or 1) + 1
+    setting.summary = (description or "")[:500]
+    setting.content = {"description": description or ""}
+    db.flush()
+    db.add(CampaignSettingHistory(
+        id=uid("setting_history"), campaign_id=campaign.id, setting_id=setting.id,
+        operation="update" if before else "create", version=setting.version,
+        before_data=before, after_data=_serialize(setting), reason="save_campaign_setting",
+        created_by=None,
+    ))
     db.commit()
     count = db.query(CampaignSetting).filter(
         CampaignSetting.campaign_id == campaign.id
     ).count()
     return _ok(
-        f"设定已保存：[{category}] {name}（{setting.id}）\n当前战役共有 {count} 条设定。",
+        f"设定已{'更新' if before else '保存'}：[{category}] {clean_name}（{setting.id}）\n"
+        f"当前战役共有 {count} 条设定。",
         setting_id=setting.id,
     )
 
@@ -1236,15 +1360,25 @@ def handle_enter_campaign_mode(
     return _ok(f"已进入 DM 模式。当前战役: {campaign.name}。\n发送 /退出 返回大厅。")
 
 def handle_exit_to_lobby(
-    db: Session, campaign: Campaign, **_kw: Any,
+    db: Session, campaign: Campaign, is_dm: bool = False, **_kw: Any,
 ) -> dict:
     """Exit current mode to lobby."""
     config = copy.deepcopy(campaign.config or {})
     config["play_style"] = "lobby"
     config.pop("dice_dm_confirmation_pending", None)
+    lobby_state = copy.deepcopy(config.get("lobby_state") or {})
+    # A campaign with an already confirmed Dice DM keeps that identity when
+    # moving to Lobby; the user should not need to confirm twice.
+    if is_dm or str(config.get("dice_dm_qq_user_id") or "").strip():
+        lobby_state["dm_confirmed"] = True
+    config["lobby_state"] = lobby_state
     campaign.config = config
     db.commit()
-    return _ok(f"已返回大厅。当前战役: {campaign.name}。\n发送 /进入DM 或 /进入骰娘 开始游戏。")
+    return _ok(
+        f"已返回大厅。当前战役: {campaign.name}。"
+        "请继续处理用户刚才的原始请求；如果用户要创建新战役，"
+        "现在使用 Lobby 的状态与战役创建工具完成，不要让用户重复描述。"
+    )
 
 def handle_read_attachment(
     db: Session, campaign: Campaign,
@@ -1277,7 +1411,9 @@ def handle_read_attachment(
 
 def handle_complete_character_sheet(
     db: Session, campaign: Campaign,
-    character_name: str = "", focus: str = "all", **_kw: Any,
+    character_name: str = "", focus: str = "all",
+    message_context: dict | None = None, user_id: str = "",
+    session_id: str | None = None, **_kw: Any,
 ) -> dict:
     """Enqueue background subagent to complete a character sheet."""
     from sqlalchemy import select as _sel
@@ -1290,9 +1426,10 @@ def handle_complete_character_sheet(
     ))
     if not character:
         return _err(f"未找到角色: {character_name}")
+    scope = _background_scope(message_context, user_id, session_id)
     task = TaskSession(
         id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
-        platform="system", chat_id=None, owner_user_id=None, session_id=None,
+        **scope,
         status="queued", priority=2, draft_data={},
         proposal_data={"agent_role": "character_sheet_completer",
                        "proposal": {"character_id": character.id, "focus": focus}},
@@ -1331,14 +1468,16 @@ def handle_check_background_tasks(
     tasks = db.scalars(_sel(TaskSession).where(
         TaskSession.campaign_id == campaign.id,
         TaskSession.task_type == "subagent_proposal",
-        TaskSession.status.in_(["queued", "running", "ready_to_review"]),
+        TaskSession.status.in_(["queued", "running", "ready_to_review", "failed"]),
     ).order_by(TaskSession.updated_at.desc()).limit(10)).all()
     if not tasks:
         return _ok("no bg tasks", turn_consuming=False)
     lines = ["bg tasks:"]
     for t in tasks:
-        prog = (t.proposal_data or {}).get("progress", "")
-        lines.append(f"  [{t.status}] {t.next_prompt or t.id[:20]} {prog}")
+        data = t.proposal_data or {}
+        result = data.get("result") or {}
+        detail = result.get("summary") or result.get("error") or data.get("error") or data.get("progress", "")
+        lines.append(f"  [{t.status}] {t.next_prompt or t.id[:20]} {detail}")
     return _ok("\n".join(lines), task_count=len(tasks), turn_consuming=False)
 
 
@@ -1346,7 +1485,9 @@ def handle_check_background_tasks(
 
 def handle_generate_npc_set(
     db: Session, campaign: Campaign,
-    count: int = 0, theme: str = "", batch_size: int = 6, **_kw: Any,
+    count: int = 0, theme: str = "", batch_size: int = 6,
+    message_context: dict | None = None, user_id: str = "",
+    session_id: str | None = None, **_kw: Any,
 ) -> dict:
     """Split N NPCs into batches and enqueue background subagent tasks."""
     if count < 1:
@@ -1358,15 +1499,17 @@ def handle_generate_npc_set(
 
     batches = (count + batch_size - 1) // batch_size
     task_ids = []
+    scope = _background_scope(message_context, user_id, session_id)
     for b in range(batches):
         start = b * batch_size
         task = TaskSession(
             id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
-            platform="system", chat_id=None, owner_user_id=None, session_id=None,
+            **scope,
             status="queued", priority=2, draft_data={},
             proposal_data={
-                "agent_role": "npc_batch_worker",
+                "agent_role": "content_writer",
                 "proposal": {
+                    "type": "npc",
                     "batch_start": start, "batch_size": batch_size,
                     "total_count": count, "theme": theme or campaign.name,
                 },
@@ -1383,7 +1526,9 @@ def handle_generate_npc_set(
 
 def handle_generate_setting(
     db: Session, campaign: Campaign,
-    category: str = "location", theme: str = "", count: int = 1, **_kw: Any,
+    category: str = "location", theme: str = "", count: int = 1,
+    message_context: dict | None = None, user_id: str = "",
+    session_id: str | None = None, **_kw: Any,
 ) -> dict:
     """Enqueue background subagent to generate campaign setting(s)."""
     if category not in {"location", "faction", "item", "event"}:
@@ -1394,14 +1539,16 @@ def handle_generate_setting(
     from app.services import uid
     from app.subagent_runner import enqueue_subagent_task
 
+    scope = _background_scope(message_context, user_id, session_id)
     task = TaskSession(
         id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
-        platform="system", chat_id=None, owner_user_id=None, session_id=None,
+        **scope,
         status="queued", priority=2, draft_data={},
         proposal_data={
-            "agent_role": "campaign_setting_writer",
+            "agent_role": "content_writer",
             "proposal": {
-                "category": category, "theme": theme or campaign.name, "count": count,
+                "type": category, "category": category,
+                "theme": theme or campaign.name, "count": count,
             },
         },
         missing_fields=[], next_prompt=f"{category} x{count}",
@@ -1416,6 +1563,8 @@ def handle_generate_content(
     db: Session, campaign: Campaign,
     type: str = "", count: int = 1, theme: str = "", prompt: str = "",
     batch_size: int = 6,
+    message_context: dict | None = None, user_id: str = "",
+    session_id: str | None = None,
     **_kw: Any,
 ) -> dict:
     """Unified content generation tool. Dispatches to background subagent."""
@@ -1429,6 +1578,7 @@ def handle_generate_content(
     from app.db.models import TaskSession
     from app.services import uid
     from app.subagent_runner import enqueue_subagent_task
+    scope = _background_scope(message_context, user_id, session_id)
 
     if type == "npc":
         batch_size = max(3, min(batch_size, 8))
@@ -1438,7 +1588,7 @@ def handle_generate_content(
             start = b * batch_size
             task = TaskSession(
                 id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
-                platform="system", chat_id=None, owner_user_id=None, session_id=None,
+                **scope,
                 status="queued", priority=2, draft_data={},
                 proposal_data={
                     "agent_role": "content_writer",
@@ -1458,7 +1608,7 @@ def handle_generate_content(
     else:
         task = TaskSession(
             id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
-            platform="system", chat_id=None, owner_user_id=None, session_id=None,
+            **scope,
             status="queued", priority=2, draft_data={},
             proposal_data={
                 "agent_role": "content_writer",
@@ -1473,7 +1623,9 @@ def handle_generate_content(
 
 
 def handle_execute_plan(
-    db: Session, campaign: Campaign, steps: list = None, summary: str = "", **_kw: Any,
+    db: Session, campaign: Campaign, steps: list = None, summary: str = "",
+    message_context: dict | None = None, user_id: str = "",
+    session_id: str | None = None, **_kw: Any,
 ) -> dict:
     """Submit a multi-step plan for background execution."""
     if not steps:
@@ -1482,9 +1634,10 @@ def handle_execute_plan(
     from app.services import uid
     from app.subagent_runner import enqueue_subagent_task
 
+    scope = _background_scope(message_context, user_id, session_id)
     task = TaskSession(
         id=uid("task"), campaign_id=campaign.id, task_type="subagent_proposal",
-        platform="system", chat_id=None, owner_user_id=None, session_id=None,
+        **scope,
         status="queued", priority=3, draft_data={},
         proposal_data={
             "agent_role": "plan_runner",
@@ -1594,6 +1747,251 @@ def handle_switch_campaign(
     set_active_napcat_campaign(db, target)
     return _ok(f"已切换到战役: {target.name}（{target.id}）")
 
+
+# ═══════════════════════════════════════════════════════════════════
+#  DURABLE AGENT JOB / ARTIFACT WORKFLOW
+# ═══════════════════════════════════════════════════════════════════
+
+_legacy_generate_content = handle_generate_content
+
+
+def _start_setting_job(
+    db: Session, campaign: Campaign, *, category: str, count: int, theme: str,
+    prompt: str = "", message_context: dict | None = None, user_id: str = "",
+    session_id: str | None = None,
+) -> dict:
+    from app.workflows.job_worker import enqueue_job
+    from app.workflows.workflow_service import create_job, message_idempotency_key
+
+    if category not in {"npc", "location", "faction", "item", "event"}:
+        return _err(f"不支持的设定类型：{category}")
+    count = max(1, min(int(count or 1), 50))
+    scope = _background_scope(message_context, user_id, session_id)
+    job = create_job(
+        db, campaign_id=campaign.id, job_type="generate_settings",
+        request_payload={
+            "category": category, "count": count,
+            "theme": theme or campaign.name, "prompt": prompt,
+        },
+        owner_user_id=scope["owner_user_id"], platform=str(scope["platform"]),
+        chat_id=scope["chat_id"], session_id=scope["session_id"],
+        idempotency_key=message_idempotency_key("generate_settings", message_context),
+    )
+    if job.status == "queued":
+        enqueue_job(job.id)
+    return _ok(
+        f"后台任务已创建：{job.id}。正在生成 {count} 条 {category} 设定；"
+        "完成后进入审核，不会自动发布。",
+        job_id=job.id, status=job.status, requested_count=count,
+    )
+
+
+def handle_generate_npc_set_v2(
+    db: Session, campaign: Campaign, count: int = 0, theme: str = "",
+    message_context: dict | None = None, user_id: str = "",
+    session_id: str | None = None, **_kw: Any,
+) -> dict:
+    if count < 1:
+        return _err("需要指定 NPC 数量。")
+    return _start_setting_job(
+        db, campaign, category="npc", count=count, theme=theme,
+        message_context=message_context, user_id=user_id, session_id=session_id,
+    )
+
+
+def handle_generate_setting_v2(
+    db: Session, campaign: Campaign, category: str = "location",
+    theme: str = "", count: int = 1, message_context: dict | None = None,
+    user_id: str = "", session_id: str | None = None, **_kw: Any,
+) -> dict:
+    return _start_setting_job(
+        db, campaign, category=category, count=count, theme=theme,
+        message_context=message_context, user_id=user_id, session_id=session_id,
+    )
+
+
+def handle_generate_content_v2(
+    db: Session, campaign: Campaign, type: str = "", count: int = 1,
+    theme: str = "", prompt: str = "", message_context: dict | None = None,
+    user_id: str = "", session_id: str | None = None, **kwargs: Any,
+) -> dict:
+    if type in {"npc", "location", "faction", "item", "event"}:
+        return _start_setting_job(
+            db, campaign, category=type, count=count, theme=theme, prompt=prompt,
+            message_context=message_context, user_id=user_id, session_id=session_id,
+        )
+    return _legacy_generate_content(
+        db=db, campaign=campaign, type=type, count=count, theme=theme,
+        prompt=prompt, message_context=message_context, user_id=user_id,
+        session_id=session_id, **kwargs,
+    )
+
+
+def handle_list_agent_jobs(
+    db: Session, campaign: Campaign, user_id: str = "", **_kw: Any,
+) -> dict:
+    from app.workflows.workflow_service import list_jobs
+    jobs = list_jobs(db, campaign.id, user_id or None)
+    if not jobs:
+        return _ok("当前没有后台 Agent 任务。", turn_consuming=False)
+    lines = ["后台 Agent 任务："]
+    for job in jobs:
+        detail = f"，错误：{job.error}" if job.error else ""
+        lines.append(f"- {job.id} [{job.status}] {job.job_type}{detail}")
+    return _ok("\n".join(lines), job_ids=[job.id for job in jobs], turn_consuming=False)
+
+
+def handle_get_agent_job_result(
+    db: Session, campaign: Campaign, job_id: str = "", user_id: str = "", **_kw: Any,
+) -> dict:
+    from app.db.models import AgentJob
+    from app.workflows.workflow_service import latest_artifact, list_jobs
+    job = db.get(AgentJob, job_id) if job_id else next(iter(list_jobs(db, campaign.id, user_id or None)), None)
+    if not job or job.campaign_id != campaign.id:
+        return _err("没有找到该后台任务。")
+    artifact = latest_artifact(db, job.id)
+    if not artifact:
+        return _ok(f"任务 {job.id} 当前状态：{job.status}。{job.error or '结果尚未生成。'}")
+    payload = artifact.payload or {}
+    settings = payload.get("settings") or []
+    lines = [f"任务 {job.id} [{job.status}]，待审核结果 {len(settings)} 条："]
+    for index, item in enumerate(settings, start=1):
+        lines.append(f"{index}. [{item.get('category')}] {item.get('name')} — {item.get('summary','')}")
+    return _ok(
+        "\n".join(lines), job_id=job.id, artifact_id=artifact.id,
+        artifact_status=artifact.status, artifact=payload, turn_consuming=False,
+    )
+
+
+def handle_accept_agent_artifact(
+    db: Session, campaign: Campaign, job_id: str = "", user_id: str = "", **_kw: Any,
+) -> dict:
+    from app.db.models import AgentJob
+    from app.workflows.workflow_service import commit_artifact, latest_artifact
+    job = db.get(AgentJob, job_id)
+    if not job or job.campaign_id != campaign.id:
+        return _err("没有找到该后台任务。")
+    artifact = latest_artifact(db, job.id)
+    if not artifact:
+        return _err("该任务还没有可接受的结果。")
+    objects = commit_artifact(db, artifact, actor_id=user_id or None)
+    return _ok(
+        f"已接受并发布 {len(objects)} 条结果："
+        + "、".join(str(item.get("name")) for item in objects[:12]),
+        job_id=job.id, committed_objects=objects,
+    )
+
+
+def handle_reject_agent_artifact(
+    db: Session, campaign: Campaign, job_id: str = "", **_kw: Any,
+) -> dict:
+    from app.db.models import AgentJob
+    from app.workflows.workflow_service import latest_artifact, reject_artifact
+    job = db.get(AgentJob, job_id)
+    if not job or job.campaign_id != campaign.id:
+        return _err("没有找到该后台任务。")
+    artifact = latest_artifact(db, job.id)
+    if not artifact:
+        return _err("该任务还没有可拒绝的结果。")
+    reject_artifact(db, artifact)
+    return _ok(f"已拒绝任务 {job.id} 的生成结果，未写入正式设定。")
+
+
+def handle_list_campaign_settings(
+    db: Session, campaign: Campaign, category: str = "", **_kw: Any,
+) -> dict:
+    from app.campaign_editor import list_settings
+    settings = list_settings(db, campaign.id)
+    if category:
+        settings = [item for item in settings if item.category == category]
+    if not settings:
+        return _ok(f"当前没有已发布的 {category or '战役'} 设定。", setting_ids=[], turn_consuming=False)
+    lines = [f"已发布设定（{len(settings)}）："]
+    for item in settings:
+        lines.append(f"- {item.id} [{item.category}] {item.name} — {item.summary or '无摘要'}")
+    return _ok("\n".join(lines), setting_ids=[item.id for item in settings], turn_consuming=False)
+
+
+def handle_get_campaign_setting(
+    db: Session, campaign: Campaign, setting_id: str = "", name: str = "", **_kw: Any,
+) -> dict:
+    from sqlalchemy import select as _select
+    from app.services import serialize as _serialize
+    setting = db.get(CampaignSetting, setting_id) if setting_id else db.scalar(_select(CampaignSetting).where(
+        CampaignSetting.campaign_id == campaign.id, CampaignSetting.name == name,
+    ))
+    if not setting or setting.campaign_id != campaign.id:
+        return _err("没有找到该战役设定。")
+    return _ok(
+        f"[{setting.category}] {setting.name}\n摘要：{setting.summary}\n"
+        f"详情：{json.dumps(setting.content or {}, ensure_ascii=False, indent=2)}",
+        setting_id=setting.id, setting=_serialize(setting), turn_consuming=False,
+    )
+
+
+def handle_randomize_character_draft(
+    db: Session, campaign: Campaign, level: int = 1, method: str = "4d6_drop_lowest",
+    user_id: str = "", player_name: str = "", **_kw: Any,
+) -> dict:
+    import random
+    from app.db.models import DiceAuditLog
+
+    if method != "4d6_drop_lowest":
+        return _err("当前仅支持 4d6_drop_lowest。")
+    names = ["鸦羽", "潮痕", "烬歌", "霜枝", "星港", "玄潮", "雾钟", "赤帆"]
+    classes = ["战士", "法师", "游荡者", "牧师", "游侠", "圣武士", "吟游诗人", "术士"]
+    ancestries = ["人类", "精灵", "矮人", "半身人", "龙裔", "提夫林"]
+    backgrounds = ["侍僧", "罪犯", "民间英雄", "贵族", "智者", "水手", "士兵", "化外之民"]
+    ability_keys = list(ABILITY_KEYS)
+    random.shuffle(ability_keys)
+    abilities: dict[str, int] = {}
+    audit: list[dict] = []
+    for ability in ability_keys:
+        rolls = [random.randint(1, 6) for _ in range(4)]
+        dropped = min(rolls)
+        total = sum(rolls) - dropped
+        detail = {"formula": "4d6dl1", "rolls": rolls, "dropped": dropped, "total": total}
+        db.add(DiceAuditLog(
+            id=uid("roll"), campaign_id=campaign.id, character_id=None,
+            roll_formula="4d6dl1", roll_result=total, roll_detail=detail,
+            context=f"随机车卡属性 {ability}", tool_name="randomize_character_draft",
+        ))
+        abilities[ability] = total
+        audit.append({"ability": ability, **detail})
+
+    platform = "napcat" if user_id else "web"
+    existing = _active_session(db, campaign, platform, user_id, None)
+    draft = {
+        "campaign_id": campaign.id,
+        "player_name": user_id or player_name or "Player",
+        "character_name": random.choice(names),
+        "class_name": random.choice(classes),
+        "ancestry": random.choice(ancestries),
+        "background": random.choice(backgrounds),
+        "level": max(1, min(int(level or 1), 20)),
+        "abilities": abilities,
+        "ability_generation": {"method": method, "rolls": audit},
+        "_meta": {"version": 1},
+    }
+    if existing:
+        existing.draft_data = draft
+        existing.missing_fields = []
+        existing.status = "ready_to_commit"
+        task = existing
+    else:
+        task = create_task(
+            db, campaign, BUILD_TASK_TYPE, platform, None, user_id, None,
+            status="ready_to_commit", draft_data=draft, missing_fields=[],
+            next_prompt="随机角色已生成，等待确认提交。",
+        )
+    db.commit()
+    return _ok(
+        "随机角色草稿已生成：\n" + _format_draft(task)
+        + "\n属性方法：4d6去最低。请确认后提交角色卡。",
+        task_session_id=task.id, character_build_session=session_payload(task),
+        roll_audit=audit,
+    )
+
 _DELEGATED = [
     "create_campaign_from_prompt", "delete_active_campaign",
     "save", "pause", "resume",
@@ -1669,10 +2067,17 @@ TOOL_HANDLERS: dict[str, Handler] = {
     "complete_character_sheet": handle_complete_character_sheet,
     "execute_plan": handle_execute_plan,
     "generate_cards_from_settings": handle_generate_cards_from_settings,
-    "generate_npc_set": handle_generate_npc_set,
-    "generate_content": handle_generate_content,
-    "generate_setting": handle_generate_setting,
+    "generate_npc_set": handle_generate_npc_set_v2,
+    "generate_content": handle_generate_content_v2,
+    "generate_setting": handle_generate_setting_v2,
     "check_background_tasks": handle_check_background_tasks,
+    "list_agent_jobs": handle_list_agent_jobs,
+    "get_agent_job_result": handle_get_agent_job_result,
+    "accept_agent_artifact": handle_accept_agent_artifact,
+    "reject_agent_artifact": handle_reject_agent_artifact,
+    "list_campaign_settings": handle_list_campaign_settings,
+    "get_campaign_setting": handle_get_campaign_setting,
+    "randomize_character_draft": handle_randomize_character_draft,
     # Delegated to execute_command
     **_DELEGATED_HANDLERS,
 }
@@ -1705,6 +2110,7 @@ def tools_for_scope(campaign: Campaign | None, is_dm: bool, message: str = "") -
 
     always_available = {
         "status", "show_bindings", "bind_character",
+        "exit_to_lobby",
         "export_character_sheet", "create_character_quick",
         "save_campaign_setting", "spell_search", "memory_search",
         "enable_combat_roleplay", "disable_combat_roleplay",
@@ -1716,6 +2122,10 @@ def tools_for_scope(campaign: Campaign | None, is_dm: bool, message: str = "") -
         "list_setting_drafts", "validate_settings",
         "create_npc_quick",
         "generate_npc_set",
+        "list_agent_jobs", "get_agent_job_result",
+        "accept_agent_artifact", "reject_agent_artifact",
+        "list_campaign_settings", "get_campaign_setting",
+        "randomize_character_draft",
     }
 
     # ── Lobby mode: limited tool set ──
@@ -1735,6 +2145,10 @@ def tools_for_scope(campaign: Campaign | None, is_dm: bool, message: str = "") -
         "complete_character_sheet", "generate_cards_from_settings",
         "generate_npc_set", "generate_setting", "generate_content",
         "execute_plan", "check_background_tasks",
+        "list_agent_jobs", "get_agent_job_result",
+        "accept_agent_artifact", "reject_agent_artifact",
+        "list_campaign_settings", "get_campaign_setting",
+        "randomize_character_draft",
     }
 
     allowed: set[str] = set(always_available)

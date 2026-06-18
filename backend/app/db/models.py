@@ -211,6 +211,72 @@ class CampaignThread(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
 
+class AgentJob(Base):
+    """Durable background work item. LLM workers never mutate domain data directly."""
+
+    __tablename__ = "agent_jobs"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    campaign_id: Mapped[str | None] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    job_type: Mapped[str] = mapped_column(String, index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String, index=True)
+    platform: Mapped[str] = mapped_column(String, default="system", index=True)
+    chat_id: Mapped[str | None] = mapped_column(String, index=True)
+    session_id: Mapped[str | None] = mapped_column(String, index=True)
+    status: Mapped[str] = mapped_column(String, default="queued", index=True)
+    progress: Mapped[dict] = mapped_column(JSON, default=dict)
+    request_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    idempotency_key: Mapped[str | None] = mapped_column(String, unique=True, index=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class AgentArtifact(Base):
+    """Schema-versioned proposal produced by an AgentJob."""
+
+    __tablename__ = "agent_artifacts"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("agent_jobs.id", ondelete="CASCADE"), index=True)
+    campaign_id: Mapped[str | None] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    artifact_type: Mapped[str] = mapped_column(String, index=True)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String, default="draft", index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    validation_errors: Mapped[list] = mapped_column(JSON, default=list)
+    committed_objects: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class NotificationOutbox(Base):
+    __tablename__ = "notification_outbox"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    campaign_id: Mapped[str | None] = mapped_column(String, index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String, index=True)
+    platform: Mapped[str] = mapped_column(String, default="system", index=True)
+    chat_id: Mapped[str | None] = mapped_column(String, index=True)
+    event_type: Mapped[str] = mapped_column(String, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String, default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class ToolCallAudit(Base):
+    __tablename__ = "tool_call_audit"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    campaign_id: Mapped[str | None] = mapped_column(String, index=True)
+    session_id: Mapped[str | None] = mapped_column(String, index=True)
+    user_id: Mapped[str | None] = mapped_column(String, index=True)
+    tool_name: Mapped[str] = mapped_column(String, index=True)
+    arguments: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
 class CampaignSetting(Base):
     __tablename__ = "campaign_settings"
     __table_args__ = (

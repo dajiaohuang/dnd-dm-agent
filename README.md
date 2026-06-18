@@ -108,13 +108,13 @@ docker compose up --build -d
 ### Frontend
 
 ```powershell
-run_webui.bat     # http://127.0.0.1:3001
+scripts\run_webui.bat     # http://127.0.0.1:3001
 ```
 
 ## QQ / NapCat
 
 ```text
-login_napcat_dnd.bat        # one-click launch
+scripts\login_napcat_dnd.bat        # one-click launch
 ```
 
 NapCat OneBot HTTP Post URL: `http://127.0.0.1:8011/napcat/callback`
@@ -122,8 +122,8 @@ NapCat OneBot HTTP Post URL: `http://127.0.0.1:8011/napcat/callback`
 Manage QQ bindings:
 
 ```powershell
-manage_qq_bindings.bat bind 123456789 char_001 --name "Player Name"
-manage_qq_bindings.bat list
+scripts\manage_qq_bindings.bat bind 123456789 char_001 --name "Player Name"
+scripts\manage_qq_bindings.bat list
 ```
 
 ## Character Sheet Import/Export

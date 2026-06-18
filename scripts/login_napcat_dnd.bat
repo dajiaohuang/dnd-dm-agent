@@ -2,13 +2,13 @@
 setlocal EnableExtensions
 chcp 65001 >nul
 
-set "ROOT=%~dp0"
-for %%I in ("%ROOT%..\napcat") do set "NAPCAT_HOME=%%~fI"
+for %%I in ("%~dp0..") do set "ROOT=%%~fI"
+for %%I in ("%ROOT%\..\napcat") do set "NAPCAT_HOME=%%~fI"
 set "NAPCAT_SOURCE=%NAPCAT_SOURCE_DIR%"
 if "%NAPCAT_SOURCE%"=="" if exist "%NAPCAT_HOME%\pkg" set "NAPCAT_SOURCE=%NAPCAT_HOME%\pkg"
 if "%NAPCAT_SOURCE%"=="" if exist "%NAPCAT_HOME%\runtime" set "NAPCAT_SOURCE=%NAPCAT_HOME%\runtime"
-if "%NAPCAT_SOURCE%"=="" if exist "%ROOT%tools\napcat\runtime" set "NAPCAT_SOURCE=%ROOT%tools\napcat\runtime"
-if "%NAPCAT_SOURCE%"=="" if exist "%ROOT%tools\napcat\pkg" set "NAPCAT_SOURCE=%ROOT%tools\napcat\pkg"
+if "%NAPCAT_SOURCE%"=="" if exist "%ROOT%\tools\napcat\runtime" set "NAPCAT_SOURCE=%ROOT%\tools\napcat\runtime"
+if "%NAPCAT_SOURCE%"=="" if exist "%ROOT%\tools\napcat\pkg" set "NAPCAT_SOURCE=%ROOT%\tools\napcat\pkg"
 set "CALLBACK_PORT=%NAPCAT_CALLBACK_PORT%"
 if "%CALLBACK_PORT%"=="" set "CALLBACK_PORT=8011"
 
@@ -24,7 +24,7 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":%CALLBACK_PORT% " ^| findst
 if defined CALLBACK_PID (
   echo Callback port %CALLBACK_PORT% is already listening.
 ) else (
-  start "DND DM NapCat Callback" /min cmd /k call "%ROOT%run_napcat_callback.bat" %CALLBACK_PORT%
+  start "DND DM NapCat Callback" /min cmd /k call "%~dp0run_napcat_callback.bat" %CALLBACK_PORT%
 )
 
 echo Waiting for callback health check and initializing the demo campaign...

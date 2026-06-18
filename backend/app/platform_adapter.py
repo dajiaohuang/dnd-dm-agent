@@ -156,7 +156,21 @@ def handle_platform_message(
         is_dm=adapter.is_dm_user(message.user_id, campaign) or message.user_id == campaign_dm_user_id,
         message_context=build_message_context(message),
     )
+    # Agent-job notifications are an outbox concern, not an LLM memory hint.
+    # Append them deterministically and mark delivered only after a reply exists.
+    from app.workflows.workflow_service import mark_notifications_delivered, pending_notifications
+    notices = pending_notifications(
+        db, platform=message.platform, owner_user_id=message.user_id,
+        campaign_id=campaign.id,
+    )
+    if notices:
+        summaries = [str((notice.payload or {}).get("summary") or notice.event_type) for notice in notices]
+        result["narration"] = (result.get("narration") or "") + "\n\n[后台通知]\n" + "\n".join(
+            f"- {summary}" for summary in summaries
+        )
     platform_reply = build_platform_reply(result)
+    if notices:
+        mark_notifications_delivered(db, notices)
     return {
         "reply": adapter.format_reply(message, platform_reply),
         "auto_escape": False,

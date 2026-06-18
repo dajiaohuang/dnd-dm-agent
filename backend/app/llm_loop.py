@@ -10,6 +10,7 @@ import json
 import inspect
 import logging
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
@@ -55,6 +56,7 @@ def execute_llm_with_tools(
             messages.append({"role": "user", "content": message})
 
     try:
+        _last_tool_outputs: list[str] = []
         for _round in range(MAX_TOOL_ROUNDS):
             resp = chat_completion(messages, tools=tools)
 
@@ -109,6 +111,7 @@ def execute_llm_with_tools(
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
+                _raw_tool_args = dict(args)
 
                 # Inject common parameters
                 args.setdefault("db", db)
@@ -149,8 +152,24 @@ def execute_llm_with_tools(
                 else:
                     result = {"ok": False, "narration": f"未知工具: {tool_name}"}
 
+                try:
+                    from app.db.models import ToolCallAudit
+                    audit_result = json.loads(json.dumps(result, ensure_ascii=False, default=str))
+                    db.add(ToolCallAudit(
+                        id=f"tool_{uuid4().hex[:12]}",
+                        campaign_id=getattr(campaign, "id", None), session_id=session_id,
+                        user_id=str(args.get("user_id") or "") or None,
+                        tool_name=tool_name, arguments=_raw_tool_args,
+                        result=audit_result if isinstance(audit_result, dict) else {"value": audit_result},
+                    ))
+                    db.commit()
+                except Exception:
+                    _log.debug("Tool audit persistence skipped", exc_info=True)
+
                 # Only send narration back to LLM (save ~150 tokens per tool call)
                 _tool_content = result.get("narration", "") if isinstance(result, dict) else str(result)
+                if _tool_content:
+                    _last_tool_outputs.append(_tool_content)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -166,7 +185,8 @@ def execute_llm_with_tools(
         _log.warning("Tool loop exhausted after %d rounds", MAX_TOOL_ROUNDS)
         return {
             "ok": True, "kind": "llm_response",
-            "narration": "操作已处理，如需更多信息请继续描述。",
+            "narration": "\n".join(dict.fromkeys(_last_tool_outputs[-3:]))
+                         or "操作已处理，如需更多信息请继续描述。",
             "data": extra_context or {},
             "rolls": [], "state_changes": [], "events": [],
         }

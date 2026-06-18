@@ -101,13 +101,13 @@ docker compose up --build -d
 ### 前端
 
 ```powershell
-run_webui.bat     # http://127.0.0.1:3001
+scripts\run_webui.bat     # http://127.0.0.1:3001
 ```
 
 ## QQ / NapCat
 
 ```text
-login_napcat_dnd.bat        # 一键启动
+scripts\login_napcat_dnd.bat        # 一键启动
 ```
 
 NapCat OneBot HTTP Post URL: `http://127.0.0.1:8011/napcat/callback`
@@ -115,8 +115,8 @@ NapCat OneBot HTTP Post URL: `http://127.0.0.1:8011/napcat/callback`
 管理 QQ 绑定:
 
 ```powershell
-manage_qq_bindings.bat bind 123456789 char_001 --name 玩家昵称
-manage_qq_bindings.bat list
+scripts\manage_qq_bindings.bat bind 123456789 char_001 --name 玩家昵称
+scripts\manage_qq_bindings.bat list
 ```
 
 ## 人物卡导入导出

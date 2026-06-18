@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import Campaign, TaskSession
@@ -148,10 +148,10 @@ def ready_reviews(
         TaskSession.task_type == "subagent_proposal",
         TaskSession.platform == platform,
         TaskSession.owner_user_id == owner_user_id,
-        TaskSession.status == "ready_to_review",
+        TaskSession.status.in_(["ready_to_review", "failed"]),
     )
     if session_id:
-        query = query.where(TaskSession.session_id == session_id)
+        query = query.where(or_(TaskSession.session_id == session_id, TaskSession.session_id.is_(None)))
     return db.scalars(query.order_by(TaskSession.updated_at.desc())).all()
 
 
@@ -161,10 +161,18 @@ def format_ready_reviews(tasks: list[TaskSession]) -> str:
         data = task.proposal_data or {}
         result = data.get("result") or {}
         stale = "（基于旧版草稿，仅供参考）" if data.get("stale") else ""
+        summary = result.get("summary")
+        if not summary and result.get("names"):
+            summary = "已生成：" + "、".join(str(name) for name in result["names"][:8])
+        if not summary and result.get("content"):
+            summary = str(result["content"])[:300]
         lines.append(
             f"{index}. {data.get('agent_role') or task.task_type}{stale}："
-            f"{result.get('summary') or task.next_prompt or '已完成'}"
+            f"{summary or task.next_prompt or '已完成'}"
         )
+        error = result.get("error") or data.get("error")
+        if error:
+            lines.append(f"   执行失败：{error}")
         issues = result.get("blocking_issues") or []
         if issues:
             lines.append("   阻塞问题：" + "；".join(str(item) for item in issues[:3]))

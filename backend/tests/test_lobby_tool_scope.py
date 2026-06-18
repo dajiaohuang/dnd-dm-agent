@@ -7,7 +7,7 @@ from app.main import app
 from app.qq_bindings import active_napcat_campaign
 from app.services import resolve_chat
 from app import llm_loop
-from app.tools.command_tools import tools_for_scope
+from app.tools.command_tools import handle_exit_to_lobby, tools_for_scope
 from app.tools.lobby_tools import handle_create_campaign_now, handle_set_lobby_state
 from fastapi.testclient import TestClient
 
@@ -111,3 +111,28 @@ def test_campaignless_lobby_persists_state_and_history(monkeypatch):
         created = handle_create_campaign_now(db=db, campaign=None, session_id=session_id)
         assert created["ok"] is True
         assert active_napcat_campaign(db).name == "黯影潮汐"
+
+
+def test_campaign_creation_is_revealed_only_after_exit_to_lobby():
+    with TestClient(app), SessionLocal() as db:
+        campaign = Campaign(
+            id="camp_cross_mode_test",
+            name="北境之门",
+            system_version="DND_5E_2014",
+            config={"play_style": "dice_assistant", "dice_dm_qq_user_id": "2480933622"},
+        )
+        db.add(campaign)
+        db.commit()
+
+        before = _tool_names(campaign)
+        assert "exit_to_lobby" in before
+        assert "create_campaign_from_prompt" not in before
+        assert "create_campaign_now" not in before
+
+        result = handle_exit_to_lobby(db=db, campaign=campaign)
+        assert result["ok"] is True
+
+        after = _tool_names(campaign)
+        assert "create_campaign_from_prompt" in after
+        assert "create_campaign_now" in after
+        assert campaign.config["lobby_state"]["dm_confirmed"] is True
