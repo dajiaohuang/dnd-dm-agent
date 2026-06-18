@@ -64,6 +64,7 @@ dependencies = [
     "filelock>=3.25.2",
     "boto3>=1.43.0",
     "sqlalchemy>=2.0.41,<3.0.0",
+    "alembic>=1.16.0,<2.0.0",
 ]
 
 [project.optional-dependencies]

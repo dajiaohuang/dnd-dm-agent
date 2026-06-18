@@ -286,7 +286,10 @@ class NapcatChannel(BaseChannel):
             content=content,
             media=media_paths or None,
             metadata={
+                "sender_id": str(user_id),
+                "group_id": str(ev.get("group_id")) if message_type == "group" else None,
                 "message_id": msg_id,
+                "message_type": message_type,
                 "is_group": message_type == "group",
                 "nickname": nickname,
                 "reply_to": reply_to_id,
@@ -405,6 +408,8 @@ class NapcatChannel(BaseChannel):
             chat_id=f"group:{group_id}",
             content=f"[group event] new member {nickname} joined group {group_id}",
             metadata={
+                "sender_id": str(user_id),
+                "group_id": str(group_id),
                 "is_group": True,
                 "event": "group_increase",
             },

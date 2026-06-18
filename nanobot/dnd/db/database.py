@@ -54,10 +54,16 @@ class Database:
         cursor.close()
 
     def create_schema(self) -> None:
-        """Create all portable D&D tables without altering existing data."""
+        """Create the current schema directly, primarily for isolated tests."""
         from nanobot.dnd.db import models  # noqa: F401
 
         Base.metadata.create_all(bind=self.engine)
+
+    def upgrade_schema(self, revision: str = "head") -> None:
+        """Upgrade a persistent database through the bundled Alembic migrations."""
+        from nanobot.dnd.db.migration import upgrade_database
+
+        upgrade_database(self.url, revision=revision)
 
     def drop_schema(self) -> None:
         """Drop all D&D tables. Intended for isolated tests only."""

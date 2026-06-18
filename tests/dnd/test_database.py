@@ -1,4 +1,4 @@
-"""Tests for the migrated D&D domain database."""
+"""Tests for the dnd-dm-skill-aligned D&D database."""
 
 from __future__ import annotations
 
@@ -9,105 +9,215 @@ from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 
 from nanobot.dnd.db import Database, sqlite_database_url
-from nanobot.dnd.db.models import Campaign, Character, NapCatCharacterBinding, ToolCallAudit
+from nanobot.dnd.db.migration import current_revision
+from nanobot.dnd.db.models import (
+    Campaign,
+    CampaignEvent,
+    CampaignSave,
+    ChannelBinding,
+    Character,
+    Combat,
+    DiceRoll,
+    Party,
+    ToolAudit,
+    WorldState,
+)
 
 
 @pytest.fixture
 def database(tmp_path: Path) -> Database:
-    db = Database(sqlite_database_url(tmp_path / "dnd.db"))
-    db.create_schema()
+    url = sqlite_database_url(tmp_path / "dnd.db")
+    db = Database(url)
+    db.upgrade_schema()
     try:
         yield db
     finally:
         db.dispose()
 
 
-def test_create_schema_migrates_domain_tables_without_mode_state(database: Database) -> None:
+def test_migration_creates_v2_domain_schema_without_legacy_mode_tables(
+    database: Database,
+) -> None:
     tables = set(inspect(database.engine).get_table_names())
 
     assert {
         "campaigns",
+        "world_states",
+        "parties",
         "characters",
-        "napcat_character_bindings",
-        "character_change_log",
+        "combats",
+        "campaign_saves",
+        "plot_summaries",
         "campaign_events",
-        "campaign_memories",
-        "campaign_settings",
-        "dice_audit_log",
-        "tool_call_audit",
+        "module_sources",
+        "module_chapters",
+        "scene_indexes",
+        "scene_states",
+        "dice_rolls",
+        "tool_audits",
+        "rule_sources",
         "rule_chunks",
         "compendium_entries",
+        "channel_bindings",
     } <= tables
     assert "lobby_session_states" not in tables
+    assert "task_sessions" not in tables
+    assert "agent_jobs" not in tables
+    assert current_revision(database.url) == "20260619_01"
 
 
-def test_campaign_character_binding_and_audit_round_trip(database: Database) -> None:
+def test_skill_aggregate_state_round_trip(database: Database) -> None:
     with database.transaction() as session:
-        session.add(Campaign(id="campaign_1", name="Avernus", config={"chapter": 1}))
+        session.add(Campaign(id="campaign_1", name="Avernus", module_name="Descent"))
+        session.flush()
+        session.add(
+            WorldState(
+                id="world_1",
+                campaign_id="campaign_1",
+                state_json={
+                    "current_chapter": 1,
+                    "current_scene": "Elfsong Tavern",
+                    "day_in_game": 1,
+                    "faction_relations": {},
+                    "quest_progress": {"进行中": ["进入地狱"]},
+                },
+            )
+        )
+        session.add(
+            Party(
+                id="party_1",
+                campaign_id="campaign_1",
+                location="Elfsong Tavern",
+                shared_gold=20,
+            )
+        )
+        session.flush()
         session.add(
             Character(
                 id="character_1",
                 campaign_id="campaign_1",
-                player_name="player",
-                character_name="Kalen",
-                data={"hp": 18},
+                party_id="party_1",
+                name="Kalen",
+                class_name="Wizard",
+                level=3,
+                hp=18,
+                max_hp=18,
+                armor_class=14,
+                sheet_json={"stats": {"intelligence": 16}, "spellSlots": [4, 2]},
             )
         )
+        session.flush()
         session.add(
-            NapCatCharacterBinding(
+            ChannelBinding(
                 id="binding_1",
                 campaign_id="campaign_1",
-                qq_user_id="123456",
+                channel="napcat",
+                external_user_id="123456",
+                external_chat_id="group_1",
                 character_id="character_1",
             )
         )
-        session.add(
-            ToolCallAudit(
-                id="audit_1",
-                campaign_id="campaign_1",
-                user_id="123456",
-                tool_name="dnd_campaign",
-                arguments={"action": "status"},
-                result={"ok": True},
-            )
-        )
 
     with database.transaction() as session:
+        world = session.scalar(select(WorldState))
         character = session.get(Character, "character_1")
-        binding = session.scalar(
-            select(NapCatCharacterBinding).where(
-                NapCatCharacterBinding.qq_user_id == "123456"
-            )
-        )
-        audit = session.get(ToolCallAudit, "audit_1")
+        binding = session.scalar(select(ChannelBinding))
 
-        assert character is not None and character.data["hp"] == 18
+        assert world is not None and world.state_json["current_chapter"] == 1
+        assert character is not None and character.sheet_json["spellSlots"] == [4, 2]
         assert binding is not None and binding.character_id == character.id
-        assert audit is not None and audit.result == {"ok": True}
 
 
-def test_binding_uniqueness_is_enforced(database: Database) -> None:
+def test_combat_save_event_and_audit_round_trip(database: Database) -> None:
     with database.transaction() as session:
         session.add(Campaign(id="campaign_1", name="Avernus"))
+        session.flush()
+        session.add(
+            Combat(
+                id="combat_1",
+                campaign_id="campaign_1",
+                name="Tavern Ambush",
+                location="Elfsong Tavern",
+                state_json={
+                    "units": [{"name": "Cultist", "hp": 9, "initiative": 12}],
+                    "log": ["combat started"],
+                },
+            )
+        )
+        session.add(
+            CampaignSave(
+                id="save_1",
+                campaign_id="campaign_1",
+                slot=1,
+                chapter="1",
+                location="Elfsong Tavern",
+                snapshot_json={
+                    "party": [],
+                    "mainQuests": [],
+                    "completedNodes": [],
+                    "plotSummary": "The party arrived.",
+                },
+            )
+        )
+        session.add(
+            CampaignEvent(
+                id="event_1",
+                campaign_id="campaign_1",
+                event_type="scene_entered",
+                content="The party entered the tavern.",
+            )
+        )
+        session.add(
+            DiceRoll(
+                id="roll_1",
+                campaign_id="campaign_1",
+                formula="1d20+5",
+                result=17,
+                detail_json={"rolls": [12], "bonus": 5},
+            )
+        )
+        session.add(
+            ToolAudit(
+                id="audit_1",
+                campaign_id="campaign_1",
+                actor_id="123456",
+                tool_name="dnd_roll",
+                arguments_json={"formula": "1d20+5"},
+                result_json={"result": 17},
+                state_version=1,
+            )
+        )
+
+    with database.transaction() as session:
+        assert session.get(Combat, "combat_1").state_json["units"][0]["hp"] == 9
+        assert session.get(CampaignSave, "save_1").snapshot_json["plotSummary"]
+        assert session.get(DiceRoll, "roll_1").result == 17
+        assert session.get(ToolAudit, "audit_1").state_version == 1
+
+
+def test_channel_binding_uniqueness_rolls_back_transaction(database: Database) -> None:
+    with database.transaction() as session:
+        session.add(Campaign(id="campaign_1", name="Avernus"))
+        session.flush()
         session.add(
             Character(
                 id="character_1",
                 campaign_id="campaign_1",
-                character_name="Kalen",
-                data={},
+                name="Kalen",
             )
         )
 
     with pytest.raises(IntegrityError), database.transaction() as session:
         for binding_id in ("binding_1", "binding_2"):
             session.add(
-                NapCatCharacterBinding(
+                ChannelBinding(
                     id=binding_id,
                     campaign_id="campaign_1",
-                    qq_user_id="123456",
+                    channel="napcat",
+                    external_user_id="123456",
                     character_id="character_1",
                 )
             )
 
     with database.transaction() as session:
-        assert session.scalar(select(NapCatCharacterBinding)) is None
+        assert session.scalar(select(ChannelBinding)) is None
