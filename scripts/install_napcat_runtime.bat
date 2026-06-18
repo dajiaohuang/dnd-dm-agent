@@ -1,7 +1,7 @@
 @echo off
 setlocal
-set "ROOT=%~dp0"
-for %%I in ("%ROOT%..\napcat") do set "NAPCAT_HOME=%%~fI"
+for %%I in ("%~dp0..") do set "ROOT=%%~fI"
+for %%I in ("%ROOT%\..\napcat") do set "NAPCAT_HOME=%%~fI"
 set "ARCHIVE=%NAPCAT_HOME%\NapCat.Shell.Windows.OneKey.zip"
 set "TARGET=%NAPCAT_HOME%\runtime"
 if not exist "%ARCHIVE%" (
