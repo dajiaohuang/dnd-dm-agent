@@ -1,7 +1,7 @@
 # 📖 模组索引（由 init.py 自动生成）
 
 > 目标：运行模组时快速定位所需信息，减少上下文浪费。
-> 每次切换模组时由 `code/module/init.py:init_module()` 重建此文件。
+> 每次切换模组时，根据当前模组源重建索引并写入战役数据库。
 
 ---
 
@@ -63,8 +63,8 @@ srd/scenes_index.json — 场景级行号索引（由 build_scene_index() 生成
 
 ## 四、玩家信息
 
-角色状态 → `live_party.json`（由 `code/party/live.py` 管理）
-世界状态 → `world_state.json`（由 `code/state/world.py` 管理）
-剧情摘要 → `plot_summary.json`（由 `code/summary/generate.py` 管理，存档时自动生成）
+角色状态 → 当前 `campaign_id` 的队伍与角色聚合
+世界状态 → 当前 `campaign_id` 的世界状态聚合
+剧情摘要 → 当前 `campaign_id` 的剧情摘要与事件记录
 
 以上内容在每次对话时动态摘要，不在此硬编码。

@@ -1,8 +1,8 @@
 """
 世界状态管理：派系关系、任务进度、已发现地点、关键NPC状态
 """
-import os
 import json
+import os
 
 WORLD_STATE_FILE = 'world_state.json'
 
@@ -10,7 +10,6 @@ WORLD_STATE_FILE = 'world_state.json'
 def get_default_world_state():
     """返回默认世界状态结构"""
     return {
-        "echo_enabled": False,
         "faction_relations": {},
         "discovered_locations": [],
         "quest_progress": {
@@ -186,29 +185,3 @@ def set_current_scene_state(world, chapter, scene):
     """设置当前章节场景"""
     world['current_chapter'] = chapter
     world['current_scene'] = scene
-
-
-def set_echo_enabled(world, enabled):
-    """
-    设置回声系统开关
-
-    参数:
-        world: dict - 世界状态
-        enabled: bool - True=开启, False=关闭
-    """
-    world['echo_enabled'] = bool(enabled)
-    save_world_state(world)
-    print(f"[回声系统] {'已开启' if enabled else '已关闭'}")
-
-
-def get_echo_enabled(world):
-    """
-    获取回声系统状态
-
-    参数:
-        world: dict - 世界状态
-
-    返回:
-        bool
-    """
-    return world.get('echo_enabled', False)

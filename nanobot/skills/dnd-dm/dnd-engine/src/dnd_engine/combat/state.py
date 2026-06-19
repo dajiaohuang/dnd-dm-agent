@@ -1,7 +1,7 @@
 """
 战斗状态跟踪器（JSON持久化）—— dnd-engine 版
 
-继承自 skill code/combat/state.py，去掉：
+继承自上游战斗状态模块，去掉：
   - get_combat_table() / build_combat_table（展示层，不在引擎）
   - new_combat() 中未使用的 display import
 """

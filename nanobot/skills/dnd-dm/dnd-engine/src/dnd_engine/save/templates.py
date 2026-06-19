@@ -1,13 +1,9 @@
 """
-存档/角色数据模板工厂
+角色与任务数据模板工厂
 
 替换 DM_RULES.md 中的 JSON schema 定义表。
 LLM 不再需要自己拼 JSON 结构——调此模块获取标准模板即可。
 """
-from datetime import datetime
-from typing import Optional
-
-
 def make_role_stats(**overrides):
     """角色六维属性模板"""
     default = {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 10, "cha": 10}
@@ -16,7 +12,7 @@ def make_role_stats(**overrides):
 
 
 def make_character_template(name="新角色", **overrides):
-    """角色数据模板 -> 对应 live_party.json / save 中的 party[] 元素"""
+    """角色数据模板 -> 对应数据库中的角色状态。"""
     template = {
         "name": name,
         "race": "",
@@ -52,26 +48,6 @@ def make_character_template(name="新角色", **overrides):
         "inventory": [],
         "activeEffects": [],
         "notes": "",
-    }
-    template.update(overrides)
-    return template
-
-
-def make_save_template(chapter=1, location="未知", **overrides):
-    """存档数据顶层模板"""
-    template = {
-        "存档名称": f"第{chapter}章·{location}",
-        "存档时间": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        "章节": chapter,
-        "location": location,
-        "current_scene": "",
-        "party": [],
-        "unlockedRooms": [],
-        "completedNodes": [],
-        "mainQuests": [],
-        "logEntries": [],
-        "notes": "",
-        "_scene_cache": None,
     }
     template.update(overrides)
     return template
