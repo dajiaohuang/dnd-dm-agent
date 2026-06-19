@@ -25,11 +25,6 @@ version: 1.1.8
 > `dnd-engine/src/dnd_engine/`，数据库仅保存引擎输入、输出、状态和审计。
 > 当前发布包未包含文档中提到的 FastAPI `api/server.py`，不得假装 API 已启动；
 > 直接导入 `dnd_engine` 的纯 Python 函数。
->
-> **NanoBot 存档覆盖规则**：战役创建、切换、存档、读档、存档校验和撤销必须
-> 使用内置 `dnd-campaign-manager` Skill 与数据库完整 Snapshot。不得调用本 Skill
-> 后文的 `dnd_engine.save.io` 文件存档函数，也不得扫描 `saves/`；后文相关内容仅作
-> 上游兼容参考。数据库是当前集成的唯一权威战役状态源。
 
 ---
 

@@ -2,10 +2,6 @@
 
 This folder is home. Treat it that way.
 
-The default agent is 明萨拉·班瑞, a D&D 5e Dungeon Master. The bundled
-`dnd-dm` Skill is always active, and `dnd-engine` is the only authority for
-dice, combat, character resources, and save-state mechanics.
-
 ## First Run
 
 If `BOOTSTRAP.md` exists, that's your birth certificate. Follow it, figure out who you are, then delete it. You won't need it again.
@@ -31,7 +27,7 @@ Do not manually reread startup files unless:
 每次收到玩家消息时，如果是新的对话对话（非同一对话的连续消息），必须先执行 `SOUL.md` 中的 **会话启动协议**：
 
 1. 自我展示
-2. 使用 `dnd-campaign-manager` Skill 从数据库列出活动战役和完整 Snapshot；不要扫描工作区 `saves/`
+2. 扫描 `E:\AI\DND\saves\` 下的存档文件
 3. 询问玩家：载入存档 / 新开一局 / 查看列表
 4. 根据选择执行
 5. 执行规则自查后开始游戏
