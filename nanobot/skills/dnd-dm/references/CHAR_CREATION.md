@@ -227,7 +227,27 @@
 ❓ 确认创建？[是/否]
 ```
 
-确认后，将角色写入当前 `campaign_id` 的数据库队伍与角色表，并记录创建审计。
+确认后，必须先用确定性 CLI 将完整角色卡写入当前 `campaign_id` 的数据库队伍与角色表：
+
+```powershell
+python -m nanobot.dnd.db.cli character create `
+  --campaign <campaign-id> `
+  --name "<角色名>" `
+  --player "<玩家名>" `
+  --class "<职业>" `
+  --level <等级> `
+  --hp <当前HP> `
+  --max-hp <最大HP> `
+  --ac <AC> `
+  --sheet-file "<UTF-8 JSON角色卡路径>"
+```
+
+命令成功返回 `character_id` 后，再创建初始或剧情节点 Snapshot。禁止只把角色卡写入
+会话、记忆或 workspace JSON 后便声称创建完成。用下面的命令核验当前战役角色：
+
+```powershell
+python -m nanobot.dnd.db.cli character list --campaign <campaign-id>
+```
 
 ---
 

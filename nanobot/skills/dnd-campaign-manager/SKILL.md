@@ -66,6 +66,10 @@ Do not save into or load an archived campaign until it is explicitly reactivated
 Use a short label describing the decision point. Every save creates a new slot;
 never overwrite an earlier slot.
 
+Before a save whose label or surrounding conversation claims that character creation is
+complete, run `character list` for the campaign. If an expected character is absent, stop
+and persist it using the character-creation procedure; never create a misleading empty save.
+
 ```powershell
 python -m nanobot.dnd.db.cli save create `
   --campaign <campaign-id> `

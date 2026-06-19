@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import func, select
 
 from nanobot.dnd.db.campaigns import CampaignService
+from nanobot.dnd.db.characters import CharacterService
 from nanobot.dnd.db.database import Database
 from nanobot.dnd.db.models import (
     Campaign,
@@ -74,6 +75,25 @@ def _parser() -> argparse.ArgumentParser:
     status = campaign_commands.add_parser("status")
     status.add_argument("--campaign", required=True)
     status.add_argument("--set", required=True, choices=("active", "archived"))
+
+    character = commands.add_parser("character")
+    character_commands = character.add_subparsers(dest="action", required=True)
+    character_create = character_commands.add_parser("create")
+    character_create.add_argument("--campaign", required=True)
+    character_create.add_argument("--name", required=True)
+    character_create.add_argument("--id")
+    character_create.add_argument("--player")
+    character_create.add_argument("--class", dest="class_name")
+    character_create.add_argument("--level", type=int)
+    character_create.add_argument("--hp", type=int)
+    character_create.add_argument("--max-hp", type=int)
+    character_create.add_argument("--ac", type=int)
+    sheet = character_create.add_mutually_exclusive_group()
+    sheet.add_argument("--sheet-json")
+    sheet.add_argument("--sheet-file")
+    character_create.add_argument("--actor")
+    character_list = character_commands.add_parser("list")
+    character_list.add_argument("--campaign", required=True)
 
     save = commands.add_parser("save")
     save_commands = save.add_subparsers(dest="action", required=True)
@@ -144,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         database.upgrade_schema()
         campaigns = CampaignService(database)
+        characters = CharacterService(database)
         snapshots = CampaignSnapshotService(database)
         if args.area == "campaign":
             if args.action == "create":
@@ -160,6 +181,30 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 result = campaigns.set_status(args.campaign, args.set)
             _emit(asdict(result) if not isinstance(result, list) else [asdict(x) for x in result])
+        elif args.area == "character":
+            if args.action == "create":
+                if args.sheet_file:
+                    sheet_json = json.loads(Path(args.sheet_file).read_text(encoding="utf-8"))
+                elif args.sheet_json:
+                    sheet_json = json.loads(args.sheet_json)
+                else:
+                    sheet_json = {}
+                result = characters.create(
+                    args.campaign,
+                    args.name,
+                    character_id=args.id,
+                    player_name=args.player,
+                    class_name=args.class_name,
+                    level=args.level,
+                    hp=args.hp,
+                    max_hp=args.max_hp,
+                    armor_class=args.ac,
+                    sheet_json=sheet_json,
+                    actor_id=args.actor,
+                )
+                _emit(asdict(result))
+            else:
+                _emit([asdict(item) for item in characters.list(args.campaign)])
         elif args.area == "save":
             if args.action == "create":
                 if args.workspace:
