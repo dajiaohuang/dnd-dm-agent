@@ -29,6 +29,8 @@ from nanobot.dnd.rules.parser import ParsedSection, parse_markdown
 DEFAULT_RULE_SET_ID = "dnd5e-2024-srd-5.2.1"
 DEFAULT_PUBLICATION_ID = "publication-srd-5.2.1"
 DEFAULT_EMBEDDING_MODEL_ID = "embedding-bge-m3"
+ZH_CN_RULE_SET_ID = "dnd5e-2014-srd-5.1"
+ZH_CN_PUBLICATION_ID = "publication-srd-5.1-zh-cn"
 
 
 @dataclass(frozen=True)
@@ -331,6 +333,213 @@ class RuleIngestService:
         return IngestResult(
             rule_set_id=DEFAULT_RULE_SET_ID,
             publication_id=DEFAULT_PUBLICATION_ID,
+            sources_indexed=indexed,
+            sources_skipped=skipped,
+            sections=section_count,
+            chunks=chunk_count,
+            embeddings=embedding_count,
+        )
+
+    def ingest_directory_srd(
+        self,
+        root_dir: str | Path,
+        *,
+        rule_set_id: str = ZH_CN_RULE_SET_ID,
+        publication_id: str = ZH_CN_PUBLICATION_ID,
+        embed: bool = True,
+        force: bool = False,
+    ) -> IngestResult:
+        """Ingest a folder-based SRD (e.g. Chinese translation).
+
+        Each subdirectory is a category; each ``.md`` file is a source.
+        """
+        root = Path(root_dir).expanduser().resolve()
+        files = sorted(root.rglob("*.md"))
+        # Filter out non-content files
+        skip_names = {"index", "changelog", "legal", "notice", "terms", "readme"}
+        files = [
+            f for f in files
+            if f.stem.casefold() not in skip_names and not f.stem.startswith("#")
+        ]
+        if not files:
+            raise FileNotFoundError(f"no SRD markdown files found under {root}")
+        embedder = self.embedder or (BgeM3Embedder(show_progress=True) if embed else None)
+
+        indexed = skipped = section_count = chunk_count = embedding_count = 0
+        with self.database.transaction() as session:
+            rule_set = session.get(RuleSet, rule_set_id)
+            if rule_set is None:
+                rule_set = RuleSet(
+                    id=rule_set_id,
+                    game_system="D&D 5e",
+                    edition="2014",
+                    release="SRD 5.1",
+                    locale="zh-CN",
+                    metadata_json={"license": "CC-BY-4.0", "source": "SagiriWWW/DND.SRD.zh-CN"},
+                )
+                session.add(rule_set)
+                session.flush()
+            publication = session.get(RulePublication, publication_id)
+            if publication is None:
+                publication = RulePublication(
+                    id=publication_id,
+                    rule_set_id=rule_set_id,
+                    name="D&D 5E SRD 中文版",
+                    slug="srd-5-1-zh-cn",
+                    publication_type="core",
+                    priority=90,
+                    license="CC-BY-4.0",
+                )
+                session.add(publication)
+                session.flush()
+            model_row = None
+            if embedder is not None:
+                model_row = session.get(EmbeddingModel, DEFAULT_EMBEDDING_MODEL_ID)
+                if model_row is None:
+                    model_row = EmbeddingModel(
+                        id=DEFAULT_EMBEDDING_MODEL_ID,
+                        provider="sentence-transformers",
+                        model_name=embedder.model_name,
+                        dimensions=embedder.dimensions,
+                    )
+                    session.add(model_row)
+
+            for file_path in files:
+                rel = file_path.relative_to(root)
+                category_name = rel.parts[0] if len(rel.parts) > 1 else "_root"
+                source_key = f"srd-5.1-zh-cn/{rel.as_posix()}"
+
+                content = file_path.read_text(encoding="utf-8")
+                checksum = _checksum(content)
+
+                source = session.scalar(
+                    select(RuleSource).where(RuleSource.source_path == source_key)
+                )
+                if source is not None and source.checksum == checksum and not force:
+                    chunks_exist = session.scalar(
+                        select(func.count()).select_from(RuleChunk).where(
+                            RuleChunk.source_id == source.id
+                        )
+                    ) or 0
+                    if chunks_exist:
+                        skipped += 1
+                        continue
+
+                if source is None:
+                    source = RuleSource(
+                        id=_stable_id("source", source_key),
+                        rule_set_id=rule_set.id,
+                        publication_id=publication.id,
+                        name=f"{category_name}/{file_path.stem}",
+                        source_path=source_key,
+                        source_type="markdown",
+                        system_version="D&D 5e 2014 / SRD 5.1",
+                        locale="zh-CN",
+                        checksum=checksum,
+                        metadata_json={
+                            "filename": file_path.name,
+                            "category": category_name,
+                        },
+                    )
+                    session.add(source)
+                    session.flush()
+                else:
+                    old_sid = list(session.scalars(
+                        select(RuleSection.id).where(RuleSection.source_id == source.id)
+                    ))
+                    if old_sid:
+                        session.execute(
+                            delete(CompendiumEntry).where(
+                                CompendiumEntry.section_id.in_(old_sid)
+                            )
+                        )
+                    session.execute(delete(RuleChunk).where(RuleChunk.source_id == source.id))
+                    session.execute(delete(RuleSection).where(RuleSection.source_id == source.id))
+                    source.rule_set_id = rule_set.id
+                    source.publication_id = publication.id
+                    source.checksum = checksum
+                    source.metadata_json = {
+                        "filename": file_path.name,
+                        "category": category_name,
+                    }
+                    session.flush()
+
+                parsed_sections, parsed_chunks = parse_markdown(content)
+                section_ids: dict[str, str] = {}
+                for section in parsed_sections:
+                    section_id = _stable_id("section", f"{source.id}:{section.path}")
+                    section_ids[section.key] = section_id
+                    session.add(
+                        RuleSection(
+                            id=section_id,
+                            source_id=source.id,
+                            publication_id=publication.id,
+                            parent_id=(
+                                section_ids.get(section.parent_key)
+                                if section.parent_key is not None
+                                else None
+                            ),
+                            section_type="chapter" if section.depth == 1 else "section",
+                            title=section.title,
+                            slug=section.slug,
+                            path=section.path,
+                            heading_path=list(section.heading_path),
+                            depth=section.depth,
+                            order_index=section.order_index,
+                            start_line=section.start_line,
+                            end_line=section.end_line,
+                            char_start=section.char_start,
+                            char_end=section.char_end,
+                        )
+                    )
+                    session.flush()
+
+                texts = [
+                    _embedding_text(
+                        rule_set, publication,
+                        " → ".join(chunk.heading_path), chunk.text,
+                    )
+                    for chunk in parsed_chunks
+                ]
+                vectors = embedder.encode(texts) if embedder is not None else [None] * len(texts)
+                for chunk, embedding_text, vector in zip(
+                    parsed_chunks, texts, vectors, strict=True
+                ):
+                    chunk_id = _stable_id("chunk", f"{source.id}:{chunk.chunk_index}")
+                    breadcrumb = " → ".join(chunk.heading_path)
+                    session.add(
+                        RuleChunk(
+                            id=chunk_id,
+                            source_id=source.id,
+                            section_id=section_ids[chunk.section_key],
+                            embedding_model_id=model_row.id if model_row else None,
+                            chunk_index=chunk.chunk_index,
+                            heading=chunk.heading,
+                            breadcrumb=breadcrumb,
+                            start_line=chunk.start_line,
+                            end_line=chunk.end_line,
+                            char_start=chunk.char_start,
+                            char_end=chunk.char_end,
+                            token_count=max(1, len(chunk.text) // 4),
+                            content_hash=_checksum(chunk.text),
+                            chunk_text=chunk.text,
+                            search_text=f"{breadcrumb}\n{chunk.text}",
+                            embedding_json=vector,
+                            metadata_json={"_source": "zh-CN"},
+                        )
+                    )
+                    session.flush()
+
+                indexed += 1
+                section_count += len(parsed_sections)
+                chunk_count += len(parsed_chunks)
+                embedding_count += sum(
+                    1 for _ in parsed_chunks if embedder is not None
+                )
+
+        return IngestResult(
+            rule_set_id=rule_set_id,
+            publication_id=publication_id,
             sources_indexed=indexed,
             sources_skipped=skipped,
             sections=section_count,

@@ -107,6 +107,10 @@ def _parser() -> argparse.ArgumentParser:
     ingest.add_argument("--references-dir")
     ingest.add_argument("--no-embed", action="store_true")
     ingest.add_argument("--force", action="store_true")
+    ingest_zh = rule_commands.add_parser("ingest-zh-cn")
+    ingest_zh.add_argument("--references-dir", required=True)
+    ingest_zh.add_argument("--no-embed", action="store_true")
+    ingest_zh.add_argument("--force", action="store_true")
     bind = rule_commands.add_parser("bind")
     bind.add_argument("--campaign", required=True)
     bind.add_argument("--rule-set", default="dnd5e-2024-srd-5.2.1")
@@ -218,6 +222,16 @@ def main(argv: list[str] | None = None) -> int:
                     asdict(
                         ingest_service.ingest_srd(
                             references_dir,
+                            embed=not args.no_embed,
+                            force=args.force,
+                        )
+                    )
+                )
+            elif args.action == "ingest-zh-cn":
+                _emit(
+                    asdict(
+                        ingest_service.ingest_directory_srd(
+                            args.references_dir,
                             embed=not args.no_embed,
                             force=args.force,
                         )
