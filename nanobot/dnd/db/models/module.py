@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from nanobot.dnd.db.database import Base
@@ -41,6 +41,7 @@ class ModuleChapter(TimestampMixin, Base):
     chapter_key: Mapped[str] = mapped_column(String)
     title: Mapped[str] = mapped_column(String, default="")
     source_path: Mapped[str] = mapped_column(String)
+    content: Mapped[str] = mapped_column(Text, default="")
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String, default="locked", index=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
@@ -62,6 +63,42 @@ class SceneIndex(TimestampMixin, Base):
     end_line: Mapped[int] = mapped_column(Integer)
     headings: Mapped[list[str]] = mapped_column(JSON, default=list)
     keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+
+class ModuleChunk(Base):
+    """Retrieval-sized module content with an optional dense vector."""
+
+    __tablename__ = "module_chunks"
+    __table_args__ = (
+        UniqueConstraint("chapter_id", "chunk_index", name="uq_module_chunk_index"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    module_id: Mapped[str] = mapped_column(
+        ForeignKey("module_sources.id", ondelete="CASCADE"), index=True
+    )
+    chapter_id: Mapped[str] = mapped_column(
+        ForeignKey("module_chapters.id", ondelete="CASCADE"), index=True
+    )
+    scene_id: Mapped[str | None] = mapped_column(
+        ForeignKey("scene_indexes.id", ondelete="SET NULL"), index=True
+    )
+    embedding_model_id: Mapped[str | None] = mapped_column(
+        ForeignKey("embedding_models.id", ondelete="SET NULL"), index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    heading: Mapped[str] = mapped_column(String, default="", index=True)
+    breadcrumb: Mapped[str] = mapped_column(Text, default="")
+    start_line: Mapped[int] = mapped_column(Integer)
+    end_line: Mapped[int] = mapped_column(Integer)
+    char_start: Mapped[int] = mapped_column(Integer)
+    char_end: Mapped[int] = mapped_column(Integer)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    content_hash: Mapped[str] = mapped_column(String, default="", index=True)
+    chunk_text: Mapped[str] = mapped_column(Text)
+    search_text: Mapped[str] = mapped_column(Text, default="")
+    embedding_json: Mapped[list[float] | None] = mapped_column(JSON)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
 
 class SceneState(TimestampMixin, Base):

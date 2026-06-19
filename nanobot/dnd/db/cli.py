@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from nanobot.dnd.db.campaigns import CampaignService
 from nanobot.dnd.db.characters import CharacterService
 from nanobot.dnd.db.database import Database
+from nanobot.dnd.db.events import CampaignEventService
 from nanobot.dnd.db.models import (
     Campaign,
     EmbeddingModel,
@@ -23,9 +24,11 @@ from nanobot.dnd.db.models import (
     RuleSet,
     RuleSource,
 )
+from nanobot.dnd.db.module_content import ModuleImportService
 from nanobot.dnd.db.snapshots import CampaignSnapshotService
 from nanobot.dnd.db.undo import UndoManager
 from nanobot.dnd.db.user_context import read_player_roles, write_player_roles
+from nanobot.dnd.modules.search import ModuleSearchService
 from nanobot.dnd.rules.ingest import RuleIngestService
 from nanobot.dnd.rules.search import RuleSearchService
 
@@ -94,6 +97,44 @@ def _parser() -> argparse.ArgumentParser:
     character_create.add_argument("--actor")
     character_list = character_commands.add_parser("list")
     character_list.add_argument("--campaign", required=True)
+
+    event = commands.add_parser("event")
+    event_commands = event.add_subparsers(dest="action", required=True)
+    event_create = event_commands.add_parser("create")
+    event_create.add_argument("--campaign", required=True)
+    event_create.add_argument("--type", dest="event_type", required=True)
+    event_create.add_argument("--content", required=True)
+    event_create.add_argument("--actor-name", action="append", default=[])
+    event_create.add_argument("--visibility", default="party")
+    event_create.add_argument("--importance", type=int, default=3)
+    event_create.add_argument("--metadata-json")
+    event_create.add_argument("--session")
+    event_create.add_argument("--actor")
+    event_list = event_commands.add_parser("list")
+    event_list.add_argument("--campaign", required=True)
+    event_list.add_argument("--limit", type=int, default=50)
+
+    module = commands.add_parser("module")
+    module_commands = module.add_subparsers(dest="action", required=True)
+    module_import = module_commands.add_parser("import")
+    module_import.add_argument("--campaign", required=True)
+    module_import.add_argument("--path", required=True)
+    module_import.add_argument("--name")
+    module_import.add_argument("--inactive", action="store_true")
+    module_import.add_argument("--no-embed", action="store_true")
+    module_import.add_argument("--actor")
+    module_list = module_commands.add_parser("list")
+    module_list.add_argument("--campaign", required=True)
+    module_index = module_commands.add_parser("index")
+    module_index.add_argument("--campaign", required=True)
+    module_scene = module_commands.add_parser("scene")
+    module_scene.add_argument("--campaign", required=True)
+    module_scene.add_argument("--scene", required=True)
+    module_search = module_commands.add_parser("search")
+    module_search.add_argument("--campaign", required=True)
+    module_search.add_argument("--query", required=True)
+    module_search.add_argument("--top-k", type=int, default=5)
+    module_search.add_argument("--no-dense", action="store_true")
 
     save = commands.add_parser("save")
     save_commands = save.add_subparsers(dest="action", required=True)
@@ -165,6 +206,8 @@ def main(argv: list[str] | None = None) -> int:
         database.upgrade_schema()
         campaigns = CampaignService(database)
         characters = CharacterService(database)
+        events = CampaignEventService(database)
+        modules = ModuleImportService(database)
         snapshots = CampaignSnapshotService(database)
         if args.area == "campaign":
             if args.action == "create":
@@ -205,6 +248,62 @@ def main(argv: list[str] | None = None) -> int:
                 _emit(asdict(result))
             else:
                 _emit([asdict(item) for item in characters.list(args.campaign)])
+        elif args.area == "event":
+            if args.action == "create":
+                result = events.create(
+                    args.campaign,
+                    args.event_type,
+                    args.content,
+                    actors=args.actor_name,
+                    visibility=args.visibility,
+                    importance=args.importance,
+                    metadata_json=(
+                        json.loads(args.metadata_json) if args.metadata_json else {}
+                    ),
+                    session_id=args.session,
+                    actor_id=args.actor,
+                )
+                _emit(asdict(result))
+            else:
+                _emit(
+                    [
+                        asdict(item)
+                        for item in events.list(args.campaign, limit=args.limit)
+                    ]
+                )
+        elif args.area == "module":
+            if args.action == "import":
+                result = modules.import_path(
+                    args.campaign,
+                    args.path,
+                    name=args.name,
+                    activate=not args.inactive,
+                    embed=not args.no_embed,
+                    actor_id=args.actor,
+                )
+                _emit(asdict(result))
+            elif args.action == "list":
+                _emit([asdict(item) for item in modules.list(args.campaign)])
+            elif args.action == "index":
+                _emit(modules.index(args.campaign))
+            elif args.action == "scene":
+                _emit(asdict(modules.read_scene(args.campaign, args.scene)))
+            else:
+                search = ModuleSearchService(database)
+                _emit(
+                    {
+                        "query": args.query,
+                        "hits": [
+                            asdict(hit)
+                            for hit in search.search(
+                                args.query,
+                                campaign_id=args.campaign,
+                                top_k=args.top_k,
+                                dense=not args.no_dense,
+                            )
+                        ],
+                    }
+                )
         elif args.area == "save":
             if args.action == "create":
                 if args.workspace:

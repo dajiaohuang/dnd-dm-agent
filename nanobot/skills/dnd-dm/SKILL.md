@@ -31,7 +31,8 @@ metadata:
 3. 按需读取当前模组场景；不要预读后续章节或泄露隐藏信息。
 4. 询问玩家行动。只有行动结果存在不确定性且失败有意义时才检定。
 5. 调用引擎完成骰子和机械结算，再把完整结果写回当前战役状态并记录审计。
-6. 输出叙事、结果和下一步选择；重大节点按规则创建完整 Snapshot。
+6. 把已实际发生、会影响后续叙事的事实追加到数据库事件日志；不要记录未发生的计划。
+7. 输出叙事、结果和下一步选择；重大节点按规则创建完整 Snapshot。
 
 详细裁决与流程见 [references/DM_RULES.md](references/DM_RULES.md)。输出格式见
 [references/DM_TEMPLATES.md](references/DM_TEMPLATES.md)。角色创建见
@@ -98,6 +99,17 @@ BGE-M3 Dense Vector 混合检索：
 python -m nanobot.dnd.db.cli rules search --campaign <campaign-id> --query "关键词" --top-k 5
 python -m nanobot.dnd.db.cli rules expand --chunk <chunk-id> --mode section
 ```
+
+## 模组 Dense 检索
+
+模组入库时使用 BGE-M3 对独立的 `module_chunks` 建立 Dense 索引，不与 SRD 规则块混合。
+需要定位地点、NPC、事件或线索时优先调用常驻 `dnd_module` 工具：先
+`action=search` 且传入当前 `campaign_id`，再对选中的 `chunk_id` 调用
+`action=expand` 读取完整场景。禁止仅凭命中摘要推进剧情。
+
+频道用户明确要求把附件作为模组时，直接调用 `dnd_module action=import`，不要通过 shell
+拼接路径。导入后依次检查 `index` 与 `status`。每轮先读取 `action=current`；实际进入或
+更新场景后调用 `action=set_scene`，使世界状态、场景进度、审计与事件日志同步落库。
 
 明确的法术、状态或物品名称优先使用精确结果；自然语言问题使用 Dense 召回。常见中文
 D&D 术语会追加对应英文 SRD 术语，但精确检索仍使用原始名称。命中后按

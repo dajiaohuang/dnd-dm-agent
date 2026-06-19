@@ -21,7 +21,6 @@ from nanobot.dnd.db.models import (
     Character,
     Combat,
     ModuleChapter,
-    ModuleSource,
     Party,
     PlotSummary,
     SceneIndex,
@@ -32,7 +31,8 @@ from nanobot.dnd.db.models import (
 )
 
 SNAPSHOT_FORMAT = "dnd-campaign-snapshot"
-SNAPSHOT_SCHEMA_VERSION = 2
+SNAPSHOT_SCHEMA_VERSION = 3
+SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS = {2, SNAPSHOT_SCHEMA_VERSION}
 
 
 class SnapshotError(RuntimeError):
@@ -170,19 +170,6 @@ _STATE_MODELS: tuple[tuple[str, type, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        "module_sources",
-        ModuleSource,
-        (
-            "id",
-            "campaign_id",
-            "name",
-            "source_path",
-            "checksum",
-            "is_active",
-            "metadata_json",
-        ),
-    ),
-    (
         "scene_states",
         SceneState,
         (
@@ -242,7 +229,7 @@ def _snapshot_hash(payload: dict[str, Any]) -> str:
 
 
 class CampaignSnapshotService:
-    """Save and restore every campaign-owned state table as one snapshot."""
+    """Save and restore mutable campaign progress without copying module content."""
 
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -370,32 +357,6 @@ class CampaignSnapshotService:
                 )
             ]
 
-        module_ids = [row["id"] for row in state["module_sources"]]
-        chapters = (
-            list(
-                session.scalars(
-                    select(ModuleChapter)
-                    .where(ModuleChapter.module_id.in_(module_ids))
-                    .order_by(ModuleChapter.id)
-                )
-            )
-            if module_ids
-            else []
-        )
-        state["module_chapters"] = [_row(item, _MODULE_CHILD_MODELS[0][2]) for item in chapters]
-        chapter_ids = [item.id for item in chapters]
-        indexes = (
-            list(
-                session.scalars(
-                    select(SceneIndex)
-                    .where(SceneIndex.chapter_id.in_(chapter_ids))
-                    .order_by(SceneIndex.id)
-                )
-            )
-            if chapter_ids
-            else []
-        )
-        state["scene_indexes"] = [_row(item, _MODULE_CHILD_MODELS[1][2]) for item in indexes]
         return {
             "format": SNAPSHOT_FORMAT,
             "schema_version": SNAPSHOT_SCHEMA_VERSION,
@@ -421,26 +382,10 @@ class CampaignSnapshotService:
                 setattr(campaign, field, payload["campaign"][field])
 
         state = payload["state"]
-        module_ids = list(
-            session.scalars(select(ModuleSource.id).where(ModuleSource.campaign_id == campaign_id))
-        )
-        chapter_ids = (
-            list(
-                session.scalars(
-                    select(ModuleChapter.id).where(ModuleChapter.module_id.in_(module_ids))
-                )
-            )
-            if module_ids
-            else []
-        )
-
-        # Delete in foreign-key order. Saves and audit history are deliberately retained.
+        # Delete mutable progress in foreign-key order. Immutable module documents,
+        # chapter metadata, and scene indexes are deliberately retained.
         session.execute(delete(ChannelBinding).where(ChannelBinding.campaign_id == campaign_id))
         session.execute(delete(SceneState).where(SceneState.campaign_id == campaign_id))
-        if chapter_ids:
-            session.execute(delete(SceneIndex).where(SceneIndex.chapter_id.in_(chapter_ids)))
-            session.execute(delete(ModuleChapter).where(ModuleChapter.id.in_(chapter_ids)))
-        session.execute(delete(ModuleSource).where(ModuleSource.campaign_id == campaign_id))
         session.execute(delete(CampaignEvent).where(CampaignEvent.campaign_id == campaign_id))
         session.execute(delete(PlotSummary).where(PlotSummary.campaign_id == campaign_id))
         session.execute(delete(Combat).where(Combat.campaign_id == campaign_id))
@@ -456,14 +401,8 @@ class CampaignSnapshotService:
             "combats",
             "plot_summaries",
             "campaign_events",
-            "module_sources",
-            "module_chapters",
-            "scene_indexes",
             "scene_states",
             "channel_bindings",
-        )
-        model_by_key.update(
-            {key: (model, fields) for key, model, fields in _MODULE_CHILD_MODELS}
         )
         for key in insert_order:
             model, fields = model_by_key[key]
@@ -480,9 +419,10 @@ class CampaignSnapshotService:
     ) -> None:
         if payload.get("format") != SNAPSHOT_FORMAT:
             raise InvalidSnapshotError("unsupported snapshot format")
-        if payload.get("schema_version") != SNAPSHOT_SCHEMA_VERSION:
+        schema_version = payload.get("schema_version")
+        if schema_version not in SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS:
             raise InvalidSnapshotError(
-                f"unsupported snapshot schema version: {payload.get('schema_version')}"
+                f"unsupported snapshot schema version: {schema_version}"
             )
         campaign_id = payload.get("campaign_id")
         if not isinstance(campaign_id, str) or not campaign_id:
@@ -493,9 +433,11 @@ class CampaignSnapshotService:
             payload.get("state"), dict
         ):
             raise InvalidSnapshotError("snapshot campaign state is malformed")
-        required = {key for key, _, _ in _STATE_MODELS} | {
-            key for key, _, _ in _MODULE_CHILD_MODELS
-        }
+        required = {key for key, _, _ in _STATE_MODELS}
+        if schema_version == 2:
+            required |= {"module_sources"} | {
+                key for key, _, _ in _MODULE_CHILD_MODELS
+            }
         missing = required - payload["state"].keys()
         if missing:
             raise InvalidSnapshotError(

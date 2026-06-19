@@ -14,8 +14,12 @@ A complete snapshot contains campaign metadata and configuration plus:
 - party and characters;
 - combats;
 - plot summaries and campaign events;
-- module sources, chapters, scene indexes, and scene state;
+- mutable module progress such as scene state;
 - campaign-scoped player/character channel records if present.
+
+Module source documents, chapter metadata, and scene indexes are immutable imported content.
+They remain in the database across restores and are referenced by scene-state IDs rather than
+copied into every snapshot.
 
 Snapshot rows, tool audit history, state revisions, dice audit history, and global
 rule/compendium data are intentionally not nested into a snapshot. Restoring a

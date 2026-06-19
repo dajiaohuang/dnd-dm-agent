@@ -61,6 +61,68 @@ python -m nanobot.dnd.db.cli campaign status --campaign <campaign-id> --set arch
 
 Do not save into or load an archived campaign until it is explicitly reactivated.
 
+## Import module content
+
+The campaign `--module` value is only a label. Before using module facts, import the supplied
+chapter documents and verify the resulting chapter, scene, chunk, and embedding counts. Markdown
+is read directly; PDF, DOCX, PPTX, XLSX, HTML, and related documents are converted through
+MarkItDown before storage and Dense indexing:
+
+```powershell
+python -m nanobot.dnd.db.cli module import `
+  --campaign <campaign-id> `
+  --name "模组名称" `
+  --path "<absolute-module-directory>"
+python -m nanobot.dnd.db.cli module list --campaign <campaign-id>
+python -m nanobot.dnd.db.cli module index --campaign <campaign-id>
+```
+
+Channel attachments are downloaded to local media paths and appear in the turn as
+`[Attachment: <path>]`. When the user explicitly identifies an attachment as module source,
+call the native `dnd_module` tool with `action=import`, the exact `source_path`, current
+`campaign_id`, and confirmed `module_name`. Then call `action=index` and `action=status` and
+report chapter, scene, chunk, and embedding counts. Do not treat every uploaded document as a
+module. The CLI above is the maintenance fallback, not the normal Agent path.
+
+Never reconstruct a published module from model memory. If source documents are absent, report
+that the campaign has only a module label and ask for a lawful local source directory.
+
+Imported module documents, chapter metadata, and scene indexes are static database content.
+Snapshots store only mutable progress such as scene state; restoring a snapshot must not delete,
+replace, or duplicate imported module content.
+
+Load only the scene required for the current turn, using the scene ID returned by `module index`:
+
+```powershell
+python -m nanobot.dnd.db.cli module scene `
+  --campaign <campaign-id> `
+  --scene <scene-id>
+```
+
+For discovery, search the active module with the resident `dnd_module` tool (`action=search`),
+which combines lexical and BGE-M3 Dense retrieval. Expand the selected chunk before relying on
+the complete scene. Use the CLI only for maintenance:
+
+```powershell
+python -m nanobot.dnd.db.cli module search --campaign <campaign-id> `
+  --query "<地点、NPC、事件或线索>" --top-k 5
+```
+
+## Run module progress
+
+At the start of a campaign turn call `dnd_module action=current`. If no current scene exists,
+use `action=index` to select the first unlocked scene, expand it, then persist entry with
+`action=set_scene`. During play:
+
+1. `search` locates candidate module facts without loading a chapter.
+2. `expand` loads the complete selected scene before narration or adjudication.
+3. `set_scene` persists the current scene, room, explored percentage, and confirmed scene facts.
+4. Scene entry automatically updates world state, writes audit, and appends a campaign event.
+5. A later snapshot captures scene/world/event progress but never duplicates module documents or
+   Dense vectors.
+
+Never call `set_scene` for a locked chapter or merely planned player movement.
+
 ## Save a complete snapshot
 
 Use a short label describing the decision point. Every save creates a new slot;

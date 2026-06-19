@@ -14,7 +14,13 @@ from nanobot.dnd.db.models.knowledge import (
     RuleSet,
     RuleSource,
 )
-from nanobot.dnd.db.models.module import ModuleChapter, ModuleSource, SceneIndex, SceneState
+from nanobot.dnd.db.models.module import (
+    ModuleChapter,
+    ModuleChunk,
+    ModuleSource,
+    SceneIndex,
+    SceneState,
+)
 from nanobot.dnd.db.models.runtime import CampaignEvent, CampaignSave, Combat, PlotSummary
 
 __all__ = [
@@ -30,6 +36,7 @@ __all__ = [
     "DiceRoll",
     "EmbeddingModel",
     "ModuleChapter",
+    "ModuleChunk",
     "ModuleSource",
     "Party",
     "PlotSummary",

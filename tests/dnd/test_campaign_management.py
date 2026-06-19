@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from nanobot.dnd.db import (
+    CampaignEventService,
     CampaignService,
     CampaignSnapshotService,
     CharacterService,
@@ -94,6 +95,51 @@ def test_cli_character_is_in_next_snapshot(tmp_path: Path, capsys) -> None:
     try:
         payload = CampaignSnapshotService(database).get("one", 1)
         assert [item["name"] for item in payload["state"]["characters"]] == ["Hero"]
+    finally:
+        database.dispose()
+
+
+def test_cli_event_is_in_next_snapshot_and_restored(tmp_path: Path, capsys) -> None:
+    url = sqlite_database_url(tmp_path / "event-cli.db")
+    common = ["--database-url", url]
+    assert main(common + ["campaign", "create", "--id", "one", "--name", "One"]) == 0
+    capsys.readouterr()
+    assert (
+        main(
+            common
+            + [
+                "event",
+                "create",
+                "--campaign",
+                "one",
+                "--type",
+                "quest_updated",
+                "--content",
+                "The party accepted the sewer investigation.",
+                "--actor-name",
+                "Hero",
+                "--importance",
+                "4",
+            ]
+        )
+        == 0
+    )
+    created = json.loads(capsys.readouterr().out)
+    assert created["event_type"] == "quest_updated"
+    assert main(common + ["save", "create", "--campaign", "one", "--label", "ready"]) == 0
+    capsys.readouterr()
+
+    database = Database(url)
+    try:
+        payload = CampaignSnapshotService(database).get("one", 1)
+        assert [item["id"] for item in payload["state"]["campaign_events"]] == [
+            created["id"]
+        ]
+        CampaignEventService(database).create("one", "later", "A later event.")
+        assert len(CampaignEventService(database).list("one")) == 2
+        CampaignSnapshotService(database).restore("one", 1)
+        restored = CampaignEventService(database).list("one")
+        assert [item.id for item in restored] == [created["id"]]
     finally:
         database.dispose()
 

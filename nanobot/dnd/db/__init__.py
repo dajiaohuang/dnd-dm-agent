@@ -3,6 +3,9 @@
 from nanobot.dnd.db.campaigns import CampaignService
 from nanobot.dnd.db.characters import CharacterService
 from nanobot.dnd.db.database import Base, Database, default_database_url, sqlite_database_url
+from nanobot.dnd.db.events import CampaignEventService
+from nanobot.dnd.db.module_content import ModuleImportService
+from nanobot.dnd.db.module_progress import ModuleProgressService
 from nanobot.dnd.db.snapshots import CampaignSnapshotService
 from nanobot.dnd.db.undo import UndoManager
 
@@ -11,7 +14,10 @@ __all__ = [
     "CampaignService",
     "CharacterService",
     "CampaignSnapshotService",
+    "CampaignEventService",
     "Database",
+    "ModuleImportService",
+    "ModuleProgressService",
     "UndoManager",
     "default_database_url",
     "sqlite_database_url",

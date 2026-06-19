@@ -2,7 +2,7 @@
 
 基于 [NanoBot](https://github.com/HKUDS/nanobot) 的 D&D 5e 地下城主 AI Agent。
 默认集成 [dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill) 的规则引擎、
-DM 人格与战役管理。
+DM 人格。
 
 ## 架构
 
