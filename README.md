@@ -32,6 +32,14 @@ SagaSmith Agent 是一个完整可运行的 AI DM 系统。它接入了 QQ（Nap
 | 🎭 **明萨拉人格** | 守序邪恶 DM，2024 规则绝对主义，冷刺幽默，绝不泄露隐藏信息 |
 | 💬 **多频道接入** | QQ（NapCat OneBot v11）、Telegram、WebSocket、WebUI |
 
+### 内置技能
+
+| 技能 | 定位 |
+|------|------|
+| 🎲 **dnd-dm** | 核心 DM 人格（always-on），规则裁判，战斗引擎，SRD 检索（参考自 [ackiles/dnd-dm-skill](https://github.com/ackiles/dnd-dm-skill)） |
+| 📋 **dnd-campaign-manager** | 战役生命周期，Snapshot 存档/读档/校验/撤销 |
+| ✍️ **dnd-module-gen** | 模组生成（5 类型 × 25 范式），多步渐进 + 沙盒 |
+
 ---
 
 ## 快速开始
