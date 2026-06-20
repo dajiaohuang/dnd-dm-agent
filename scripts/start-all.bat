@@ -4,28 +4,24 @@ cd /d "%~dp0.."
 :: ============================================================
 ::  dnd-dm-agent full startup
 ::  Usage:
-::    start-all.bat                  full start (QR login)
-::    start-all.bat /Quick           skip QR (saved login)
+::    start-all.bat                  full start (shows QR)
+::    start-all.bat /NoQR            skip QR display
 ::    start-all.bat /NoQQ            skip NapCat QQ entirely
 ::    start-all.bat /CpuOnly         CPU mode for embeddings
 ::    start-all.bat /RestartGateway  kill + restart gateway
 :: ============================================================
 
 set NOQQ=0
-set QUICK=0
+set NOQR=0
 set CPUONLY=0
 set RESTART=0
 
 :parse_args
 if "%~1"=="" goto args_done
 if /i "%~1"=="/NoQQ" set NOQQ=1
-if /i "%~1"=="/Quick" set QUICK=1
+if /i "%~1"=="/NoQR" set NOQR=1
 if /i "%~1"=="/CpuOnly" set CPUONLY=1
 if /i "%~1"=="/RestartGateway" set RESTART=1
-if /i "%~1"=="-NoQQ" set NOQQ=1
-if /i "%~1"=="-Quick" set QUICK=1
-if /i "%~1"=="-CpuOnly" set CPUONLY=1
-if /i "%~1"=="-RestartGateway" set RESTART=1
 shift
 goto parse_args
 :args_done
@@ -44,17 +40,17 @@ if %NOQQ%==1 (
 
 if not exist "localqq\NapCat.44498.Shell\QQ.exe" (
     echo [!] QQ.exe not found
-    echo     Run: powershell -ExecutionPolicy Bypass -File scripts\setup-napcat.ps1
+    echo     Run: powershell -File scripts\setup-napcat.ps1
     echo     Or skip: start-all.bat /NoQQ
     goto gateway
 )
 
-if %QUICK%==1 (
-    echo [..] Starting NapCat QQ (quick, saved login)...
-    start "NapCat-QQ" /min powershell -NoProfile -ExecutionPolicy Bypass -File "localqq\start-quick.ps1"
+if %NOQR%==1 (
+    echo [..] Starting NapCat QQ (no QR)...
+    start "NapCat-QQ" /min powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\napcat-start.ps1" -NoQR
 ) else (
-    echo [..] Starting NapCat QQ (QR login may be needed)...
-    start "NapCat-QQ" /min powershell -NoProfile -ExecutionPolicy Bypass -File "localqq\start.ps1"
+    echo [..] Starting NapCat QQ (QR will auto-open)...
+    start "NapCat-QQ" /min powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\napcat-start.ps1"
 )
 
 :: ---------- nanobot gateway ----------

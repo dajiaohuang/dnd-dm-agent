@@ -3,25 +3,29 @@ cd /d "%~dp0.."
 
 :: ============================================================
 ::  dnd-dm-agent quick start
-::  Launches NapCat QQ + nanobot gateway
-::  Double-click to start everything.
+::  NapCat QQ (saved login) + nanobot gateway (GPU)
+::  Double-click to run.
 :: ============================================================
 
 title dnd-dm-agent (Quick)
 
 echo ============================================
 echo   dnd-dm-agent (Quick Start)
+echo   NapCat QQ + Gateway (GPU)
 echo ============================================
+echo.
+echo   First time? Use start-all.bat to scan QR.
+echo.
 
 :: ---------- NapCat QQ ----------
 if not exist "localqq\NapCat.44498.Shell\QQ.exe" (
     echo [!] QQ.exe not found
-    echo     Run: powershell -ExecutionPolicy Bypass -File scripts\setup-napcat.ps1
+    echo     Run: powershell -File scripts\setup-napcat.ps1
     goto gateway
 )
 
 echo [..] Starting NapCat QQ (saved login)...
-start "NapCat-QQ" /min powershell -NoProfile -ExecutionPolicy Bypass -File "localqq\start-quick.ps1"
+start "NapCat-QQ" /min powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\napcat-start.ps1" -NoQR
 
 :: ---------- nanobot gateway ----------
 :gateway
@@ -33,7 +37,7 @@ echo.
 echo ============================================
 echo   Starting up...
 echo   WebUI:  http://127.0.0.1:18765
-echo   NapCat: http://127.0.0.1:6099 (ws://127.0.0.1:3001)
+echo   NapCat: http://127.0.0.1:6099
 echo ============================================
 echo.
 echo   Close this window after both are ready.
