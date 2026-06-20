@@ -14,7 +14,7 @@ echo ============================================
 
 :: ---------- NapCat QQ ----------
 echo [..] Starting NapCat QQ...
-start "NapCat-QQ" tools\napcat\launch.bat 1534055688
+start "NapCat-QQ" cmd /c "cd /d tools\NapCat.Shell && launcher.bat 1534055688"
 
 :: ---------- nanobot gateway ----------
 echo [..] Starting nanobot gateway (GPU)...

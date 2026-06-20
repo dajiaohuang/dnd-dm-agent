@@ -8,7 +8,6 @@
 .orion
 
 # Local QQ + NapCat runtime
-tools/napcat/
 
 # External references (but not project skill references)
 references/
@@ -107,3 +106,6 @@ temp/
 exp/
 .playwright-mcp/
 bridge/node_modules/
+tools/NapCat.Shell/
+tools/QQ*.exe
+tools/NapCat.Shell.zip
