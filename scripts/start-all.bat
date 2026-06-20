@@ -38,8 +38,8 @@ if %NOQQ%==1 (
     goto gateway
 )
 
-if not exist "napcat_localqq\NapCat.44498.Shell\QQ.exe" (
-    echo [!] QQ.exe not found
+if not exist "napcat_localqq\napcat\NapCatWinBootMain.exe" (
+    echo [!] NapCat not found
     echo     Run: powershell -File scripts\setup-napcat.ps1
     echo     Or skip: start-all.bat /NoQQ
     goto gateway
