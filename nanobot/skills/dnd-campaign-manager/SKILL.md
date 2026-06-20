@@ -32,7 +32,20 @@ managed player-role block in `USER.md`; it never replaces the whole file.
 
 ## Manage campaigns
 
-Create only after the user asks to start a new campaign:
+Create only after the user asks to start a new campaign. Prefer the native
+`dnd_campaign` tool — the CLI below is the maintenance fallback.
+
+### 一键开团（推荐）
+
+Use `dnd_campaign` with `action=start` for a one-shot startup:
+creates campaign + pins rules + creates initial snapshot (slot 1, "初始状态")
++ optionally imports module content. All in one call:
+
+```
+dnd_campaign action=start name="战役名称" module_name="模组名称" [source_path="<path>"]
+```
+
+### 分步操作（维护后备）
 
 ```powershell
 python -m nanobot.dnd.db.cli campaign create --name "战役名称" --module "模组名称"
@@ -52,7 +65,7 @@ once before adjudication:
 python -m nanobot.dnd.db.cli rules bind --campaign <campaign-id>
 ```
 
-Inspect or archive:
+Inspect or archive (also available via `dnd_campaign show` / `set_status`):
 
 ```powershell
 python -m nanobot.dnd.db.cli campaign show --campaign <campaign-id>
@@ -131,12 +144,24 @@ Never call `set_scene` for a locked chapter or merely planned player movement.
 
 ## Save a complete snapshot
 
-Use a short label describing the decision point. Every save creates a new slot;
-never overwrite an earlier slot.
+Prefer the native `dnd_save` tool. Use a short label describing the decision point.
+Every save creates a new slot; never overwrite an earlier slot. Restore auto-saves
+current state before loading. Archived campaigns are rejected.
+
+```
+dnd_save action=create campaign_id=<id> label="进入地城前"
+dnd_save action=list campaign_id=<id>
+dnd_save action=verify campaign_id=<id> slot=1
+dnd_save action=restore campaign_id=<id> slot=1 [auto_save=true]
+dnd_save action=delete campaign_id=<id> slot=3
+dnd_save action=export campaign_id=<id> slot=1 output="save.json"
+```
 
 Before a save whose label or surrounding conversation claims that character creation is
 complete, run `character list` for the campaign. If an expected character is absent, stop
 and persist it using the character-creation procedure; never create a misleading empty save.
+
+The CLI below is the maintenance fallback:
 
 ```powershell
 python -m nanobot.dnd.db.cli save create `

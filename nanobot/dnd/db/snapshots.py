@@ -228,6 +228,13 @@ def _snapshot_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _assert_active(campaign: Campaign) -> None:
+    if campaign.status == "archived":
+        raise SnapshotError(
+            f"campaign is archived; reactivate before saving or loading: {campaign.id}"
+        )
+
+
 class CampaignSnapshotService:
     """Save and restore mutable campaign progress without copying module content."""
 
@@ -243,39 +250,55 @@ class CampaignSnapshotService:
     ) -> SnapshotInfo:
         with self.database.transaction() as session:
             campaign = self._campaign(session, campaign_id, lock=True)
-            payload = self.capture_from_session(session, campaign_id)
-            slot = int(
-                session.scalar(
-                    select(func.coalesce(func.max(CampaignSave.slot), 0)).where(
-                        CampaignSave.campaign_id == campaign_id
-                    )
+            _assert_active(campaign)
+            return self._create_in_session(
+                session, campaign_id, label=label, campaign_name=campaign.name,
+                actor_id=actor_id,
+            )
+
+    def _create_in_session(
+        self,
+        session: Session,
+        campaign_id: str,
+        *,
+        label: str = "",
+        campaign_name: str = "",
+        actor_id: str | None = None,
+    ) -> SnapshotInfo:
+        """Create a snapshot row inside an already-open *session*."""
+        payload = self.capture_from_session(session, campaign_id)
+        slot = int(
+            session.scalar(
+                select(func.coalesce(func.max(CampaignSave.slot), 0)).where(
+                    CampaignSave.campaign_id == campaign_id
                 )
-                or 0
-            ) + 1
-            world = payload["state"]["world_states"]
-            world_json = world[0].get("state_json", {}) if world else {}
-            party = payload["state"]["parties"]
-            location = (party[0].get("location") if party else None) or world_json.get(
-                "current_scene", ""
             )
-            chapter = str(world_json.get("current_chapter", ""))
-            save = CampaignSave(
-                id=f"save_{uuid.uuid4().hex}",
-                campaign_id=campaign_id,
-                slot=slot,
-                label=label or f"{campaign.name} #{slot}",
-                chapter=chapter,
-                location=location or "",
-                snapshot_json=payload,
-                snapshot_format=SNAPSHOT_FORMAT,
-                snapshot_hash=_snapshot_hash(payload),
-                created_by=actor_id,
-                schema_version=SNAPSHOT_SCHEMA_VERSION,
-                state_version=self._snapshot_state_version(payload),
-            )
-            session.add(save)
-            session.flush()
-            return self._info(save)
+            or 0
+        ) + 1
+        world = payload["state"]["world_states"]
+        world_json = world[0].get("state_json", {}) if world else {}
+        party = payload["state"]["parties"]
+        location = (party[0].get("location") if party else None) or world_json.get(
+            "current_scene", ""
+        )
+        chapter = str(world_json.get("current_chapter", ""))
+        save = CampaignSave(
+            id=f"save_{uuid.uuid4().hex}",
+            campaign_id=campaign_id,
+            slot=slot,
+            label=label or f"{campaign_name} #{slot}",
+            chapter=chapter,
+            location=location or "",
+            snapshot_json=payload,
+            snapshot_format=SNAPSHOT_FORMAT,
+            snapshot_hash=_snapshot_hash(payload),
+            created_by=actor_id,
+            schema_version=SNAPSHOT_SCHEMA_VERSION,
+            state_version=self._snapshot_state_version(payload),
+        )
+        session.add(save)
+        session.flush()
+        return self._info(save)
 
     def list(self, campaign_id: str) -> list[SnapshotInfo]:
         with self.database.transaction() as session:
@@ -300,9 +323,16 @@ class CampaignSnapshotService:
         actor_id: str | None = None,
         session_id: str | None = None,
         request_id: str | None = None,
+        auto_save: bool = True,
     ) -> RestoreResult:
+        if auto_save:
+            try:
+                self.create(campaign_id, label="auto-before-restore", actor_id=actor_id)
+            except Exception:
+                pass  # Non-fatal if auto-save fails
         with self.database.transaction() as session:
-            self._campaign(session, campaign_id, lock=True)
+            campaign = self._campaign(session, campaign_id, lock=True)
+            _assert_active(campaign)
             save = self._save(session, campaign_id, slot)
             payload = self._validated_payload(save, campaign_id)
             before = self.capture_from_session(session, campaign_id)

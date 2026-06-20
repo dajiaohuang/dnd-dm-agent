@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 from pathlib import Path
 
 from sqlalchemy import select
@@ -192,3 +194,67 @@ def test_cli_campaign_save_load_and_user_projection(
     loaded = json.loads(capsys.readouterr().out)
     assert loaded["campaign_id"] == "one"
     assert read_player_roles(tmp_path, "one").endswith("Alice：Hero")
+
+
+def test_campaign_start_creates_initial_snapshot(tmp_path: Path) -> None:
+    database = Database(sqlite_database_url(tmp_path / "start.db"))
+    database.upgrade_schema()
+    try:
+        info = CampaignService(database).start("TestStart", module_name="TestMod")
+        assert info.save_count == 1
+        assert info.status == "active"
+        # Verify snapshot exists
+        snaps = CampaignSnapshotService(database).list(info.id)
+        assert len(snaps) == 1
+        assert snaps[0].label == "初始状态"
+    finally:
+        database.dispose()
+
+
+def test_campaign_show_includes_save_count(tmp_path: Path) -> None:
+    database = Database(sqlite_database_url(tmp_path / "saveshow.db"))
+    database.upgrade_schema()
+    try:
+        CampaignService(database).create("TestShow", campaign_id="show1")
+        info = CampaignService(database).get("show1")
+        assert info.save_count == 0
+        CampaignSnapshotService(database).create("show1", label="S1")
+        CampaignSnapshotService(database).create("show1", label="S2")
+        info = CampaignService(database).get("show1")
+        assert info.save_count == 2
+    finally:
+        database.dispose()
+
+
+def test_archived_campaign_rejects_save_and_load(tmp_path: Path) -> None:
+    database = Database(sqlite_database_url(tmp_path / "arch.db"))
+    database.upgrade_schema()
+    try:
+        CampaignService(database).create("ArchCamp", campaign_id="arch1")
+        snaps = CampaignSnapshotService(database)
+        snaps.create("arch1", label="S1")
+        CampaignService(database).set_status("arch1", "archived")
+        # Save should fail
+        with pytest.raises(RuntimeError):
+            snaps.create("arch1", label="S2")
+        # Load should fail
+        with pytest.raises(RuntimeError):
+            snaps.restore("arch1", 1, auto_save=False)
+    finally:
+        database.dispose()
+
+
+def test_restore_auto_save(tmp_path: Path) -> None:
+    database = Database(sqlite_database_url(tmp_path / "autosave.db"))
+    database.upgrade_schema()
+    try:
+        CampaignService(database).create("AutoSave", campaign_id="as1")
+        snaps = CampaignSnapshotService(database)
+        snaps.create("as1", label="S1")
+        # Restore with auto_save should create an auto-before-restore snapshot
+        result = snaps.restore("as1", 1, auto_save=True)
+        saves = snaps.list("as1")
+        labels = [s.label for s in saves]
+        assert "auto-before-restore" in labels
+    finally:
+        database.dispose()
