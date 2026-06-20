@@ -7,7 +7,7 @@
 > *"规则书为经文，模组为地图，骰子为审判官。"*  
 > — 明萨拉·班瑞，SagaSmith 默认 DM
 
-SagaSmith Agent 是一个完整可运行的 AI DM 系统。它接入了 QQ（NapCat）、Telegram、WebSocket 等聊天频道，玩家在群里发消息即可跑团。背后是 SQLite/PostgreSQL 战役数据库、BGE-M3 规则检索引擎、d20 战斗计算引擎，以及一个守序邪恶的卓尔 DM 人格。
+SagaSmith Agent 是一个完整可运行的 AI DM 系统。接入 QQ（NapCat）、Telegram、WebSocket 等聊天频道，玩家在群里发消息即可跑团。背后是 SQLite/PostgreSQL 战役数据库、BGE-M3 规则检索引擎、d20 战斗计算引擎，以及一个守序邪恶的卓尔 DM 人格。
 
 ---
 
@@ -112,7 +112,7 @@ QQ 通过 NapCat（OneBot v11 Forward WebSocket）接入，首次运行自动安
 python -m nanobot.dnd.db.cli module import --campaign <id> --path "<模组目录>" --name "模组名"
 ```
 
-分块策略：1200 字上限、≈100 字重叠、不跨标题边界、保留页码范围。
+分块策略：1200 字上限、≈100 字重叠、不跨标题边界、保留页码。
 
 ---
 
@@ -122,7 +122,7 @@ python -m nanobot.dnd.db.cli module import --campaign <id> --path "<模组目录
 
 ```powershell
 python -m nanobot.dnd.db.cli rules status
-python -m nanobot.dnd.db.cli rules search --campaign <id> --query "grapple escape" --top-k 5
+python -m nanobot.dnd.db.cli rules search --campaign <id> --query "擒抱逃脱" --top-k 5
 ```
 
 GPU 加速：`$env:DND_EMBEDDING_DEVICE="cuda"`。
