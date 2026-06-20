@@ -115,12 +115,13 @@ class DndModuleTool(Tool):
         if action == "import":
             if not resolved_campaign:
                 raise ValueError("campaign_id is required for module import")
-            if not source_path:
-                raise ValueError("source_path is required for module import")
+            if not source_path and not query:
+                raise ValueError("source_path or content is required for module import")
             result = self.import_service.import_path(
                 resolved_campaign,
-                source_path,
+                source_path or "",
                 name=module_name,
+                content=query if not source_path else None,
                 embed=dense,
             )
             self.search_service.clear_cache()

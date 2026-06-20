@@ -477,13 +477,25 @@ class ModuleImportService:
     def import_path(
         self,
         campaign_id: str,
-        source_path: str | Path,
+        source_path: str | Path = "",
         *,
         name: str | None = None,
+        content: str | None = None,
         activate: bool = True,
         embed: bool = True,
         actor_id: str | None = None,
     ) -> ModuleInfo:
+        if content:
+            cid = campaign_id
+            txt = content
+            return self._import_content(
+                cid, txt,
+                name=name,
+                activate=activate,
+                embed=embed,
+                actor_id=actor_id,
+            )
+
         source = Path(source_path).expanduser().resolve()
         files = [source] if source.is_file() else sorted(source.rglob("*"))
         files = [
@@ -522,205 +534,12 @@ class ModuleImportService:
                     )
                 )
         parsed.sort(key=lambda item: item.order_key)
-
-        with self.database.transaction() as session:
-            campaign = session.get(Campaign, campaign_id)
-            if campaign is None:
-                raise CampaignNotFoundError(f"campaign not found: {campaign_id}")
-            existing = session.scalar(
-                select(ModuleSource).where(
-                    ModuleSource.campaign_id == campaign_id,
-                    ModuleSource.name == module_name,
-                )
-            )
-            if existing is not None:
-                raise ModuleAlreadyExistsError(
-                    f"module already exists in campaign {campaign_id}: {module_name}"
-                )
-            if activate:
-                for item in session.scalars(
-                    select(ModuleSource).where(ModuleSource.campaign_id == campaign_id)
-                ):
-                    item.is_active = False
-
-            model_row = None
-            if embedder is not None:
-                model_row = session.get(EmbeddingModel, DEFAULT_EMBEDDING_MODEL_ID)
-                if model_row is None:
-                    model_row = EmbeddingModel(
-                        id=DEFAULT_EMBEDDING_MODEL_ID,
-                        provider="sentence-transformers",
-                        model_name=embedder.model_name,
-                        dimensions=embedder.dimensions,
-                    )
-                    session.add(model_row)
-                elif (
-                    model_row.model_name != embedder.model_name
-                    or model_row.dimensions != embedder.dimensions
-                ):
-                    raise ValueError(
-                        "active embedding model metadata does not match the embedder"
-                    )
-                session.flush()
-
-            module = ModuleSource(
-                id=f"module_{uuid.uuid4().hex[:16]}",
-                campaign_id=campaign_id,
-                name=module_name,
-                source_path=str(source),
-                checksum=digest.hexdigest(),
-                is_active=activate,
-                metadata_json={
-                    "format": "converted-markdown",
-                    "chapter_count": len(parsed),
-                    "source_extensions": sorted({path.suffix.lower() for path in files}),
-                },
-            )
-            session.add(module)
-            session.flush()
-            scene_count = chunk_count = embedding_count = 0
-            current_assigned = False
-            for order, document in enumerate(parsed):
-                path = document.source_path
-                content = document.content
-                lines = content.splitlines()
-                if document.chapter_key == "frontmatter" or document.chapter_key.startswith(
-                    "appendix."
-                ):
-                    status = "reference"
-                elif activate and not current_assigned:
-                    status = "current"
-                    current_assigned = True
-                else:
-                    status = "locked"
-                chapter = ModuleChapter(
-                    id=f"chapter_{uuid.uuid4().hex[:16]}",
-                    module_id=module.id,
-                    chapter_key=document.chapter_key,
-                    title=document.title,
-                    source_path=str(path),
-                    content=content,
-                    order_index=order,
-                    status=status,
-                    metadata_json={
-                        "checksum": hashlib.sha256(path.read_bytes()).hexdigest(),
-                        "line_count": len(lines),
-                        **document.metadata,
-                    },
-                )
-                session.add(chapter)
-                session.flush()
-                scene_rows: list[SceneIndex] = []
-                for scene_order, scene in enumerate(_scenes(lines), start=1):
-                    scene_row = SceneIndex(
-                            id=f"scene_{uuid.uuid4().hex[:16]}",
-                            chapter_id=chapter.id,
-                            scene_key=f"scene_{scene_order:03d}",
-                            title=str(scene["title"]),
-                            start_line=int(scene["start_line"]),
-                            end_line=int(scene["end_line"]),
-                            headings=list(scene["headings"]),
-                            keywords=list(scene["keywords"]),
-                        )
-                    session.add(scene_row)
-                    scene_rows.append(scene_row)
-                    scene_count += 1
-                session.flush()
-
-                parsed_chunks = parse_module_markdown(content)
-                parsed_chunks = [
-                    chunk for chunk in parsed_chunks if chunk.chunk_type != "toc"
-                ]
-                embedding_texts = [
-                    f"{module_name} | {chapter.chapter_key} | "
-                    f"{' → '.join(chunk.heading_path)}\n{chunk.text}"
-                    for chunk in parsed_chunks
-                ]
-                vectors = (
-                    embedder.encode(embedding_texts)
-                    if embedder is not None
-                    else [None] * len(embedding_texts)
-                )
-                for chunk, embedding_text, vector in zip(
-                    parsed_chunks, embedding_texts, vectors, strict=True
-                ):
-                    scene_row = next(
-                        (
-                            scene
-                            for scene in scene_rows
-                            if scene.start_line <= chunk.start_line <= scene.end_line
-                        ),
-                        None,
-                    )
-                    breadcrumb = " → ".join(chunk.heading_path)
-                    session.add(
-                        ModuleChunk(
-                            id=f"module_chunk_{uuid.uuid4().hex[:16]}",
-                            module_id=module.id,
-                            chapter_id=chapter.id,
-                            scene_id=scene_row.id if scene_row else None,
-                            embedding_model_id=model_row.id if model_row else None,
-                            chunk_index=chunk.chunk_index,
-                            heading=chunk.heading,
-                            breadcrumb=breadcrumb,
-                            start_line=chunk.start_line,
-                            end_line=chunk.end_line,
-                            char_start=chunk.char_start,
-                            char_end=chunk.char_end,
-                            page_start=chunk.page_start,
-                            page_end=chunk.page_end,
-                            chunk_type=chunk.chunk_type,
-                            token_count=max(1, len(chunk.text) // 4),
-                            content_hash=hashlib.sha256(
-                                chunk.text.encode("utf-8")
-                            ).hexdigest(),
-                            chunk_text=chunk.text,
-                            search_text=f"{module_name}\n{chapter.title}\n{breadcrumb}\n{chunk.text}",
-                            embedding_json=vector,
-                            metadata_json={
-                                "embedding_text_hash": hashlib.sha256(
-                                    embedding_text.encode("utf-8")
-                                ).hexdigest(),
-                                "overlap_chars": chunk.overlap_chars,
-                            },
-                        )
-                    )
-                    chunk_count += 1
-                    embedding_count += vector is not None
-            if activate:
-                campaign.module_name = module_name
-            session.flush()
-            session.add(
-                ToolAudit(
-                    id=f"audit_module_{uuid.uuid4().hex[:16]}",
-                    request_id=f"module-import:{uuid.uuid4().hex}",
-                    campaign_id=campaign_id,
-                    actor_id=actor_id,
-                    tool_name="dnd_module_import",
-                    engine_function="database.module.import",
-                    arguments_json={"name": module_name, "source_path": str(source)},
-                    result_json={
-                        "module_id": module.id,
-                        "chapter_count": len(parsed),
-                        "scene_count": scene_count,
-                        "chunk_count": chunk_count,
-                        "embeddings": embedding_count,
-                    },
-                    success=True,
-                )
-            )
-            return ModuleInfo(
-                id=module.id,
-                campaign_id=campaign_id,
-                name=module.name,
-                source_path=module.source_path,
-                checksum=module.checksum,
-                is_active=module.is_active,
-                chapter_count=len(parsed),
-                scene_count=scene_count,
-                chunk_count=chunk_count,
-                embeddings=embedding_count,
-            )
+        return self._finish_import(
+            campaign_id, module_name, str(source), digest, parsed,
+            embedder, embed, activate, actor_id,
+            format_label="converted-markdown",
+            source_extensions=sorted({path.suffix.lower() for path in files}),
+        )
 
     def list(self, campaign_id: str) -> list[ModuleInfo]:
         with self.database.transaction() as session:
@@ -843,6 +662,285 @@ class ModuleImportService:
             module.name = name
             session.flush()
             return self._module_info(session, module, campaign_id)
+
+    def _import_content(
+        self,
+        campaign_id: str,
+        text: str,
+        *,
+        name: str | None = None,
+        activate: bool = True,
+        embed: bool = True,
+        actor_id: str | None = None,
+    ) -> ModuleInfo:
+        """Import module from a Markdown string (LLM-generated or inline)."""
+        if not name:
+            # Extract title from first H1
+            for line in text.splitlines():
+                s = line.strip()
+                if s.startswith("# ") and not s.startswith("## "):
+                    name = s[2:].strip()
+                    break
+        if not name:
+            raise ModuleImportError("module name must not be empty")
+        module_name = name.strip()
+
+        embedder = self.embedder or (BgeM3Embedder(show_progress=True) if embed else None)
+
+        # Split text into chapters by H1 headings
+        lines = text.splitlines()
+        h1_positions = [
+            i for i, l in enumerate(lines)
+            if l.startswith("# ") and not l.startswith("## ")
+        ]
+
+        if not h1_positions:
+            # No H1 — treat entire text as one chapter
+            chapters_raw = [(module_name, text, 0)]
+        else:
+            chapters_raw = []
+            for idx, pos in enumerate(h1_positions):
+                title = lines[pos][2:].strip()
+                end = h1_positions[idx + 1] if idx + 1 < len(h1_positions) else len(lines)
+                chapter_text = "\n".join(lines[pos:end])
+                chapters_raw.append((title, chapter_text, idx))
+
+        digest = hashlib.sha256(text.encode("utf-8"))
+        source = Path("generated://") / module_name
+        parsed: list[_ChapterDocument] = []
+        for title, chapter_text, idx in chapters_raw:
+            parsed.append(
+                _ChapterDocument(
+                    source_path=source,
+                    chapter_key=f"ch.{idx + 1}" if idx > 0 else "frontmatter",
+                    title=title,
+                    content=chapter_text + "\n",
+                    order_key=(idx, title.lower()),
+                    metadata={"converter": "generated-v1"},
+                )
+            )
+        parsed.sort(key=lambda item: item.order_key)
+        return self._finish_import(
+            campaign_id, module_name, str(source), digest, parsed,
+            embedder, embed, activate, actor_id,
+            format_label="generated-v1",
+            source_extensions=[".gen"],
+        )
+
+    def _finish_import(
+        self,
+        campaign_id: str,
+        module_name: str,
+        source_str: str,
+        digest: "hashlib._Hash",
+        parsed: list[_ChapterDocument],
+        embedder: Any,
+        embed: bool,
+        activate: bool,
+        actor_id: str | None,
+        *,
+        format_label: str = "converted-markdown",
+        source_extensions: list[str] | None = None,
+    ) -> ModuleInfo:
+        """Shared tail of import_path and _import_content."""
+        with self.database.transaction() as session:
+            campaign = session.get(Campaign, campaign_id)
+            if campaign is None:
+                raise CampaignNotFoundError(f"campaign not found: {campaign_id}")
+            existing = session.scalar(
+                select(ModuleSource).where(
+                    ModuleSource.campaign_id == campaign_id,
+                    ModuleSource.name == module_name,
+                )
+            )
+            if existing is not None:
+                raise ModuleAlreadyExistsError(
+                    f"module already exists in campaign {campaign_id}: {module_name}"
+                )
+            if activate:
+                for item in session.scalars(
+                    select(ModuleSource).where(ModuleSource.campaign_id == campaign_id)
+                ):
+                    item.is_active = False
+
+            model_row = None
+            if embedder is not None:
+                model_row = session.get(EmbeddingModel, DEFAULT_EMBEDDING_MODEL_ID)
+                if model_row is None:
+                    model_row = EmbeddingModel(
+                        id=DEFAULT_EMBEDDING_MODEL_ID,
+                        provider="sentence-transformers",
+                        model_name=embedder.model_name,
+                        dimensions=embedder.dimensions,
+                    )
+                    session.add(model_row)
+                elif (
+                    model_row.model_name != embedder.model_name
+                    or model_row.dimensions != embedder.dimensions
+                ):
+                    raise ValueError(
+                        "active embedding model metadata does not match the embedder"
+                    )
+                session.flush()
+
+            module = ModuleSource(
+                id=f"module_{uuid.uuid4().hex[:16]}",
+                campaign_id=campaign_id,
+                name=module_name,
+                source_path=source_str,
+                checksum=digest.hexdigest(),
+                is_active=activate,
+                metadata_json={
+                    "format": format_label,
+                    "chapter_count": len(parsed),
+                    "source_extensions": source_extensions or [".gen"],
+                },
+            )
+            session.add(module)
+            session.flush()
+            scene_count = chunk_count = embedding_count = 0
+            current_assigned = False
+            for order, document in enumerate(parsed):
+                path = document.source_path
+                content = document.content
+                lines = content.splitlines()
+                if document.chapter_key == "frontmatter" or document.chapter_key.startswith(
+                    "appendix."
+                ):
+                    status = "reference"
+                elif activate and not current_assigned:
+                    status = "current"
+                    current_assigned = True
+                else:
+                    status = "locked"
+                chapter = ModuleChapter(
+                    id=f"chapter_{uuid.uuid4().hex[:16]}",
+                    module_id=module.id,
+                    chapter_key=document.chapter_key,
+                    title=document.title,
+                    source_path=str(path),
+                    content=content,
+                    order_index=order,
+                    status=status,
+                    metadata_json={
+                        "checksum": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                        "line_count": len(lines),
+                        **document.metadata,
+                    },
+                )
+                session.add(chapter)
+                session.flush()
+                scene_rows: list[SceneIndex] = []
+                for scene_order, scene in enumerate(_scenes(lines), start=1):
+                    scene_row = SceneIndex(
+                        id=f"scene_{uuid.uuid4().hex[:16]}",
+                        chapter_id=chapter.id,
+                        scene_key=f"scene_{scene_order:03d}",
+                        title=str(scene["title"]),
+                        start_line=int(scene["start_line"]),
+                        end_line=int(scene["end_line"]),
+                        headings=list(scene["headings"]),
+                        keywords=list(scene["keywords"]),
+                    )
+                    session.add(scene_row)
+                    scene_rows.append(scene_row)
+                    scene_count += 1
+                session.flush()
+
+                parsed_chunks = parse_module_markdown(content)
+                parsed_chunks = [
+                    chunk for chunk in parsed_chunks if chunk.chunk_type != "toc"
+                ]
+                embedding_texts = [
+                    f"{module_name} | {chapter.chapter_key} | "
+                    f"{' → '.join(chunk.heading_path)}\n{chunk.text}"
+                    for chunk in parsed_chunks
+                ]
+                vectors = (
+                    embedder.encode(embedding_texts)
+                    if embedder is not None
+                    else [None] * len(embedding_texts)
+                )
+                for chunk, embedding_text, vector in zip(
+                    parsed_chunks, embedding_texts, vectors, strict=True
+                ):
+                    scene_row = next(
+                        (
+                            scene
+                            for scene in scene_rows
+                            if scene.start_line <= chunk.start_line <= scene.end_line
+                        ),
+                        None,
+                    )
+                    breadcrumb = " → ".join(chunk.heading_path)
+                    session.add(
+                        ModuleChunk(
+                            id=f"module_chunk_{uuid.uuid4().hex[:16]}",
+                            module_id=module.id,
+                            chapter_id=chapter.id,
+                            scene_id=scene_row.id if scene_row else None,
+                            embedding_model_id=model_row.id if model_row else None,
+                            chunk_index=chunk.chunk_index,
+                            heading=chunk.heading,
+                            breadcrumb=breadcrumb,
+                            start_line=chunk.start_line,
+                            end_line=chunk.end_line,
+                            char_start=chunk.char_start,
+                            char_end=chunk.char_end,
+                            page_start=chunk.page_start,
+                            page_end=chunk.page_end,
+                            chunk_type=chunk.chunk_type,
+                            token_count=max(1, len(chunk.text) // 4),
+                            content_hash=hashlib.sha256(
+                                chunk.text.encode("utf-8")
+                            ).hexdigest(),
+                            chunk_text=chunk.text,
+                            search_text=f"{module_name}\n{chapter.title}\n{breadcrumb}\n{chunk.text}",
+                            embedding_json=vector,
+                            metadata_json={
+                                "embedding_text_hash": hashlib.sha256(
+                                    embedding_text.encode("utf-8")
+                                ).hexdigest(),
+                                "overlap_chars": chunk.overlap_chars,
+                            },
+                        )
+                    )
+                    chunk_count += 1
+                    embedding_count += vector is not None
+            if activate:
+                campaign.module_name = module_name
+            session.flush()
+            session.add(
+                ToolAudit(
+                    id=f"audit_module_{uuid.uuid4().hex[:16]}",
+                    request_id=f"module-import:{uuid.uuid4().hex}",
+                    campaign_id=campaign_id,
+                    actor_id=actor_id,
+                    tool_name="dnd_module_import",
+                    engine_function="database.module.import",
+                    arguments_json={"name": module_name, "source": source_str},
+                    result_json={
+                        "module_id": module.id,
+                        "chapter_count": len(parsed),
+                        "scene_count": scene_count,
+                        "chunk_count": chunk_count,
+                        "embeddings": embedding_count,
+                    },
+                    success=True,
+                )
+            )
+            return ModuleInfo(
+                id=module.id,
+                campaign_id=campaign_id,
+                name=module.name,
+                source_path=module.source_path,
+                checksum=module.checksum,
+                is_active=module.is_active,
+                chapter_count=len(parsed),
+                scene_count=scene_count,
+                chunk_count=chunk_count,
+                embeddings=embedding_count,
+            )
 
     @staticmethod
     def _module_info(session: Any, module: ModuleSource, campaign_id: str) -> ModuleInfo:
