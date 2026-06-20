@@ -1,11 +1,13 @@
-# D&D DM Agent — Handover
+# SagaSmith-skills — 迁移手记
 
 将本项目的所有自定义内容打包为一个独立 plugin，安装到任意 NanoBot / OpenClaw / Hermes 实例。
+
+✅ **迁移已完成** — 产物位于 `D:\mcp\SagaSmith-skills\`（102 文件）
 
 ## 最小结构
 
 ```
-dnd-dm-plugin/
+SagaSmith-skills/
 │
 ├── skills/                          # 3 个 Skill 目录（纯 Markdown，跨平台）
 │   ├── dnd-dm/

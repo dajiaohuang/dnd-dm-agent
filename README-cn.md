@@ -16,7 +16,7 @@ SagaSmith Agent 是一个完整可运行的 AI DM 系统。接入 QQ（NapCat）
 | 仓库 | 定位 |
 |------|------|
 | 🎲 **SagaSmith-agent**（本仓库） | 完整 AI DM 运行时 |
-| 📦 [SagaSmith-skill](https://github.com/dajiaohuang/SagaSmith-skill) | 跨平台 skill 插件包（NanoBot / OpenClaw / Hermes） |
+| 📦 [SagaSmith-skills](https://github.com/dajiaohuang/SagaSmith-skills) | 跨平台 skill 插件包（NanoBot / OpenClaw / Hermes） |
 | ✍️ [SagaSmith-module-gen-skill](https://github.com/dajiaohuang/SagaSmith-module-gen-skill) | 独立模组生成器（纯 Markdown skill） |
 
 ---
