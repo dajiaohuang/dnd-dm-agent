@@ -22,8 +22,9 @@ from nanobot.dnd.db.models import (
     SceneIndex,
     ToolAudit,
 )
+from nanobot.dnd.modules.chunking import parse_module_markdown
+from nanobot.dnd.modules.pdf_parser import convert_pdf_to_markdown, page_for_offset
 from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder
-from nanobot.dnd.rules.parser import parse_markdown
 
 DEFAULT_EMBEDDING_MODEL_ID = "embedding-bge-m3"
 SUPPORTED_MODULE_EXTENSIONS = {
@@ -78,18 +79,152 @@ class SceneContentInfo:
     content: str
 
 
+@dataclass(frozen=True)
+class _ChapterDocument:
+    source_path: Path
+    chapter_key: str
+    title: str
+    content: str
+    order_key: tuple[int, str]
+    metadata: dict[str, object]
+
+
 _CHAPTER_PATTERNS = (
     re.compile(r"(?:^|\W)ch(?:apter)?\.?\s*(\d+)", re.IGNORECASE),
     re.compile(r"第\s*(\d+)\s*章"),
 )
+_CHINESE_CHAPTER_RE = re.compile(r"第\s*([一二三四五六七八九十]+)\s*章")
+_CHINESE_NUMBERS = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
+
+
+def _number_in(value: str) -> int | None:
+    for pattern in _CHAPTER_PATTERNS:
+        match = pattern.search(value)
+        if match:
+            return int(match.group(1))
+    match = _CHINESE_CHAPTER_RE.search(value)
+    return _CHINESE_NUMBERS.get(match.group(1)) if match else None
 
 
 def _chapter_number(path: Path, fallback: int) -> int:
-    for pattern in _CHAPTER_PATTERNS:
-        match = pattern.search(path.stem)
-        if match:
-            return int(match.group(1))
-    return fallback
+    return _number_in(path.stem) or fallback
+
+
+def _chapter_key(title: str, fallback: int) -> tuple[str, tuple[int, str]]:
+    number = _number_in(title)
+    if number is not None:
+        return f"ch.{number}", (number, title)
+    appendix = re.search(r"附录\s*([A-ZＡ-Ｚ])", title, re.IGNORECASE)
+    if appendix:
+        letter = appendix.group(1)
+        if "Ａ" <= letter <= "Ｚ":
+            letter = chr(ord(letter) - 0xFEE0)
+        letter = letter.lower()
+        return f"appendix.{letter}", (100 + ord(letter), title)
+    return f"ch.{fallback}", (fallback, title)
+
+
+def _split_pdf_chapters(path: Path, content: str, metadata: dict[str, object]) -> list[_ChapterDocument]:
+    headings = list(re.finditer(r"(?m)^#\s+(.+?)\s*$", content))
+    candidates: list[dict[str, object]] = []
+    for index, heading in enumerate(headings):
+        original_end = headings[index + 1].start() if index + 1 < len(headings) else len(content)
+        title = heading.group(1).strip()
+        key, order_key = _chapter_key(title, index + 1)
+        candidates.append(
+            {
+                "heading": heading,
+                "title": title,
+                "key": key,
+                "order_key": order_key,
+                "original_length": original_end - heading.start(),
+            }
+        )
+
+    selected: list[dict[str, object]] = []
+    for number in range(1, 6):
+        matches = [item for item in candidates if item["key"] == f"ch.{number}"]
+        if matches:
+            selected.append(max(matches, key=lambda item: int(item["original_length"])))
+    chapter_five_start = min(
+        (
+            item["heading"].start()
+            for item in selected
+            if item["key"] == "ch.5"
+        ),
+        default=len(content),
+    )
+    selected.extend(
+        item
+        for item in candidates
+        if str(item["key"]).startswith("appendix.")
+        and item["heading"].start() > chapter_five_start
+    )
+    selected.sort(key=lambda item: item["heading"].start())
+
+    used_appendices: set[str] = set()
+    documents: list[_ChapterDocument] = []
+    first_start = selected[0]["heading"].start() if selected else len(content)
+    if content[:first_start].strip():
+        front = content[:first_start].strip() + "\n"
+        documents.append(
+            _ChapterDocument(
+                source_path=path,
+                chapter_key="frontmatter",
+                title="Front Matter",
+                content=front,
+                order_key=(0, "frontmatter"),
+                metadata={
+                    **metadata,
+                    "page_start": page_for_offset(content, 0),
+                    "page_end": page_for_offset(content, first_start),
+                },
+            )
+        )
+    for index, item in enumerate(selected):
+        heading = item["heading"]
+        end = selected[index + 1]["heading"].start() if index + 1 < len(selected) else len(content)
+        title = str(item["title"])
+        key = str(item["key"])
+        order_key = item["order_key"]
+        if key.startswith("appendix.") and key in used_appendices:
+            suffix = chr(ord(key[-1]) + 1)
+            while f"appendix.{suffix}" in used_appendices:
+                suffix = chr(ord(suffix) + 1)
+            key = f"appendix.{suffix}"
+            order_key = (100 + ord(suffix), title)
+        if key.startswith("appendix."):
+            used_appendices.add(key)
+        page_start = page_for_offset(content, heading.start())
+        chapter_content = content[heading.start() : end].strip() + "\n"
+        if page_start is not None and not chapter_content.startswith("<!-- page:"):
+            chapter_content = f"<!-- page: {page_start} -->\n\n{chapter_content}"
+        documents.append(
+            _ChapterDocument(
+                source_path=path,
+                chapter_key=key,
+                title=title,
+                content=chapter_content,
+                order_key=order_key,
+                metadata={
+                    **metadata,
+                    "page_start": page_start,
+                    "page_end": page_for_offset(content, end),
+                },
+            )
+        )
+    return documents
 
 
 def _title(path: Path, lines: list[str]) -> str:
@@ -158,18 +293,30 @@ class ModuleImportService:
         self.embedder = embedder
         self.converter = converter
 
-    def _read_document(self, path: Path) -> str:
+    def _read_document(self, path: Path) -> tuple[str, dict[str, object]]:
         if path.suffix.lower() in {".md", ".markdown", ".txt"}:
-            return path.read_text(encoding="utf-8-sig")
+            return path.read_text(encoding="utf-8-sig"), {"converter": "direct-text"}
         if self.converter is not None:
-            return self.converter(path)
+            return self.converter(path), {"converter": "custom"}
+        if path.suffix.lower() == ".pdf":
+            result = convert_pdf_to_markdown(path)
+            if result.warnings:
+                raise ModuleImportError("; ".join(result.warnings))
+            return result.content, {
+                "converter": "pypdf-structured-v1",
+                "page_count": result.page_count,
+                "bookmark_count": result.bookmark_count,
+                "matched_bookmarks": result.matched_bookmarks,
+                "heading_count": result.heading_count,
+                "room_heading_count": result.room_heading_count,
+            }
         from markitdown import MarkItDown
 
         result = MarkItDown(enable_plugins=False).convert(str(path))
         content = getattr(result, "text_content", None)
         if not isinstance(content, str) or not content.strip():
             raise ModuleImportError(f"MarkItDown produced no text: {path}")
-        return content
+        return content, {"converter": "markitdown"}
 
     def import_path(
         self,
@@ -196,16 +343,29 @@ class ModuleImportService:
         embedder = self.embedder or (BgeM3Embedder(show_progress=True) if embed else None)
 
         digest = hashlib.sha256()
-        parsed: list[tuple[Path, list[str], int, str]] = []
+        parsed: list[_ChapterDocument] = []
         for fallback, path in enumerate(files, start=1):
             raw = path.read_bytes()
             digest.update(path.relative_to(source.parent if source.is_file() else source).as_posix().encode())
             digest.update(b"\0")
             digest.update(raw)
-            content = self._read_document(path)
-            lines = content.splitlines()
-            parsed.append((path, lines, _chapter_number(path, fallback), content))
-        parsed.sort(key=lambda item: (item[2], item[0].name.lower()))
+            content, conversion_metadata = self._read_document(path)
+            if path.suffix.lower() == ".pdf":
+                parsed.extend(_split_pdf_chapters(path, content, conversion_metadata))
+            else:
+                lines = content.splitlines()
+                number = _chapter_number(path, fallback)
+                parsed.append(
+                    _ChapterDocument(
+                        source_path=path,
+                        chapter_key=f"ch.{number}",
+                        title=_title(path, lines),
+                        content=content,
+                        order_key=(number, path.name.lower()),
+                        metadata=conversion_metadata,
+                    )
+                )
+        parsed.sort(key=lambda item: item.order_key)
 
         with self.database.transaction() as session:
             campaign = session.get(Campaign, campaign_id)
@@ -263,19 +423,33 @@ class ModuleImportService:
             session.add(module)
             session.flush()
             scene_count = chunk_count = embedding_count = 0
-            for order, (path, lines, chapter_number, content) in enumerate(parsed):
+            current_assigned = False
+            for order, document in enumerate(parsed):
+                path = document.source_path
+                content = document.content
+                lines = content.splitlines()
+                if document.chapter_key == "frontmatter" or document.chapter_key.startswith(
+                    "appendix."
+                ):
+                    status = "reference"
+                elif activate and not current_assigned:
+                    status = "current"
+                    current_assigned = True
+                else:
+                    status = "locked"
                 chapter = ModuleChapter(
                     id=f"chapter_{uuid.uuid4().hex[:16]}",
                     module_id=module.id,
-                    chapter_key=f"ch.{chapter_number}",
-                    title=_title(path, lines),
+                    chapter_key=document.chapter_key,
+                    title=document.title,
                     source_path=str(path),
                     content=content,
                     order_index=order,
-                    status="current" if activate and order == 0 else "locked",
+                    status=status,
                     metadata_json={
                         "checksum": hashlib.sha256(path.read_bytes()).hexdigest(),
                         "line_count": len(lines),
+                        **document.metadata,
                     },
                 )
                 session.add(chapter)
@@ -297,7 +471,10 @@ class ModuleImportService:
                     scene_count += 1
                 session.flush()
 
-                _, parsed_chunks = parse_markdown(content)
+                parsed_chunks = parse_module_markdown(content)
+                parsed_chunks = [
+                    chunk for chunk in parsed_chunks if chunk.chunk_type != "toc"
+                ]
                 embedding_texts = [
                     f"{module_name} | {chapter.chapter_key} | "
                     f"{' → '.join(chunk.heading_path)}\n{chunk.text}"
@@ -334,6 +511,9 @@ class ModuleImportService:
                             end_line=chunk.end_line,
                             char_start=chunk.char_start,
                             char_end=chunk.char_end,
+                            page_start=chunk.page_start,
+                            page_end=chunk.page_end,
+                            chunk_type=chunk.chunk_type,
                             token_count=max(1, len(chunk.text) // 4),
                             content_hash=hashlib.sha256(
                                 chunk.text.encode("utf-8")
@@ -344,7 +524,8 @@ class ModuleImportService:
                             metadata_json={
                                 "embedding_text_hash": hashlib.sha256(
                                     embedding_text.encode("utf-8")
-                                ).hexdigest()
+                                ).hexdigest(),
+                                "overlap_chars": chunk.overlap_chars,
                             },
                         )
                     )

@@ -32,6 +32,9 @@ class ModuleSearchHit:
     text: str
     start_line: int
     end_line: int
+    page_start: int | None
+    page_end: int | None
+    chunk_type: str
     channels: tuple[str, ...]
 
 
@@ -123,6 +126,9 @@ class ModuleSearchService:
                 "text": text,
                 "start_line": scene.start_line if scene else chunk.start_line,
                 "end_line": scene.end_line if scene else chunk.end_line,
+                "page_start": chunk.page_start,
+                "page_end": chunk.page_end,
+                "chunk_type": chunk.chunk_type,
             }
 
     @staticmethod
@@ -215,6 +221,9 @@ class ModuleSearchService:
                     text=chunk.chunk_text,
                     start_line=chunk.start_line,
                     end_line=chunk.end_line,
+                    page_start=chunk.page_start,
+                    page_end=chunk.page_end,
+                    chunk_type=chunk.chunk_type,
                     channels=tuple(sorted(channels.get(chunk_id, set()))),
                 )
             )

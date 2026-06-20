@@ -122,6 +122,42 @@ $env:DND_EMBEDDING_DEVICE="cuda"; nanobot gateway     # 启动 gateway
 
 QQ 频道模板位于 `nanobot/templates/agent/identity.md`。
 
+## 模组导入
+
+支持 Markdown (.md)、PDF、DOCX、PPTX、XLSX 等格式。非 Markdown 文件通过 `markitdown`
+转 Markdown 后入库；PDF 不使用 markitdown，而使用专有的结构解析器。
+
+### PDF 解析
+
+`nanobot/dnd/modules/pdf_parser.py` 提供布局感知的 PDF→Markdown 转换：
+
+- **分页与书签感知**：提取 PDF 书签作为章节/附录锚点，每段文本保留源页码
+- **CJK 重排**：检测并合并因排版断行产生的碎片行
+- **去噪**：自动去除重复出现的页眉/页脚/页码线
+- **目录过滤**：识别并与正文章节匹配的书签被优先保留，纯目录项不进入检索
+
+```powershell
+# 导入 PDF 模组
+python -m nanobot.dnd.db.cli module import --campaign <id> --source "<path>/*.pdf" --activate
+```
+
+导入时自动拆分章节（支持中文数字章节、`ch.1`、`附录A` 等格式），Front Matter / 附录
+标记为 `reference`，首个非前置章节标记为 `current`，其余为 `locked`。
+
+### 分块策略
+
+`nanobot/dnd/modules/chunking.py` 按以下规则切块：
+
+| 参数 | 值 |
+|------|-----|
+| 块大小上限 | 1200 字 |
+| 重叠量 | ≈100 字 |
+| 边界约束 | 不允许跨标题边界切块 |
+| 特殊类型 | `room`（房间标题）、`statblock`（属性块）、`list`（列表/表格） |
+| 页码范围 | 每个 chunk 保留 `page_start`/`page_end`，支持溯源 |
+
+目录项（`toc`）不进入 Dense 向量检索。
+
 ## 规则检索
 
 2700+ 规则块，`BAAI/bge-m3` (1024 维) 语义索引，混合 FTS + 精确名称 + Dense Vector 检索。
@@ -175,7 +211,7 @@ DM_agent/
 ├── nanobot/                  # Agent 运行时
 │   ├── agent/                # Agent Loop · Context · Memory · Runner
 │   ├── channels/             # napcat · telegram · websocket · ...
-│   ├── dnd/                  # D&D 适配层 (rules · db · engine)
+│   ├── dnd/                  # D&D 适配层 (rules · db · engine · modules)
 │   ├── skills/               # dnd-dm · dnd-campaign-manager · napcat-qq
 │   └── templates/            # 系统提示模板 (identity · SOUL · platform_policy)
 ├── localqq/                  # NapCat + 便携 QQ 运行时 (.gitignore)

@@ -84,6 +84,12 @@ call the native `dnd_module` tool with `action=import`, the exact `source_path`,
 report chapter, scene, chunk, and embedding counts. Do not treat every uploaded document as a
 module. The CLI above is the maintenance fallback, not the normal Agent path.
 
+PDF imports use the dedicated structured converter rather than MarkItDown's flat PDF text:
+page boundaries and bookmarks are retained, repeated margins are removed, wrapped CJK text is
+reflowed, chapter/appendix duplicates from the table of contents are discarded, and room headings
+become retrieval boundaries. Reject the import when bookmark coverage is below 95% or no headings
+can be recovered. Every stored chunk must retain its source page range.
+
 Never reconstruct a published module from model memory. If source documents are absent, report
 that the campaign has only a module label and ask for a lawful local source directory.
 
