@@ -172,6 +172,22 @@ python -m nanobot.dnd.db.cli rules search --campaign <id> --query "grapple escap
 
 运行时通过常驻 `dnd_rules` 工具调用，GPU 加速（`DND_EMBEDDING_DEVICE=cuda`）。
 
+### 场景索引导出
+
+从已入库的模组内容导出场景索引 JSON，格式兼容
+`references/dnd-dm-skill/srd/scenes_index.json`：
+
+```powershell
+# 导出到 stdout
+python -m nanobot.dnd.db.cli module export-scenes --campaign <id>
+
+# 导出到文件
+python -m nanobot.dnd.db.cli module export-scenes --campaign <id> --output scenes.json
+```
+
+场景检测自动适配标题层级（H2/H3/H4），包含 `type: "room"` 子节标注和
+中英文混合标签（intro/exploration/dungeon/combat/social/transition）。
+
 ## 战役管理
 
 战役状态以数据库为唯一权威源，支持完整 Snapshot 存档与恢复。

@@ -7,7 +7,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
 from sqlalchemy import select
 
@@ -247,7 +247,21 @@ def _tags(title: str) -> list[str]:
 
 
 def _scenes(lines: list[str]) -> list[dict[str, object]]:
-    starts = [index for index, line in enumerate(lines) if line.startswith("## ")]
+    """Split lines into scenes; auto-detect heading level for scene boundaries."""
+    _h_counts = {
+        level: sum(
+            1
+            for l in lines
+            if l.startswith(level * "#" + " ") and not l.startswith((level + 1) * "#")
+        )
+        for level in (2, 3, 4)
+    }
+    scene_level = 2 if _h_counts[2] > 0 else (3 if _h_counts[3] > 0 else 4)
+    sub_level = scene_level + 1 if scene_level < 4 else None
+    scene_prefix = scene_level * "#" + " "
+    sub_prefix = sub_level * "#" + " " if sub_level else None
+
+    starts = [index for index, line in enumerate(lines) if line.startswith(scene_prefix)]
     if not starts and lines:
         return [
             {
@@ -261,11 +275,11 @@ def _scenes(lines: list[str]) -> list[dict[str, object]]:
     scenes: list[dict[str, object]] = []
     for position, start in enumerate(starts):
         end = starts[position + 1] if position + 1 < len(starts) else len(lines)
-        title = lines[start][3:].strip()
+        title = lines[start][scene_level + 1 :].strip()
         headings = [
             line.lstrip("# ").strip()
             for line in lines[start + 1 : end]
-            if line.startswith("### ")
+            if sub_prefix and line.startswith(sub_prefix)
         ]
         scenes.append(
             {
@@ -277,6 +291,116 @@ def _scenes(lines: list[str]) -> list[dict[str, object]]:
             }
         )
     return scenes
+
+
+def _parse_scene_index(lines: list[str]) -> list[dict[str, object]]:
+    """Re-parse chapter content with scene/sub-section/room heading logic.
+
+    The heading level used for scene boundaries is auto-detected:
+    - H2 (``## ``) is preferred; if none are found H3 (``### ``) is used instead.
+    - The level immediately below the scene level becomes untyped sub-sections.
+    - Two levels below becomes ``type: "room"`` sub-sections.
+
+    Tags follow the same English + Chinese keyword heuristics as the reference
+    ``scene_index.py``.
+    """
+    _h_counts = {
+        level: sum(1 for l in lines if l.startswith(level * "#" + " ") and not l.startswith((level + 1) * "#"))
+        for level in (2, 3, 4)
+    }
+    scene_level = 2 if _h_counts[2] > 0 else (3 if _h_counts[3] > 0 else 4)
+    sub_level = scene_level + 1 if scene_level < 4 else None
+    room_level = scene_level + 2 if scene_level < 3 else None
+
+    scene_prefix = scene_level * "#" + " "
+    sub_prefix = sub_level * "#" + " " if sub_level else None
+    room_prefix = room_level * "#" + " " if room_level else None
+
+    def _strip_heading(text: str) -> str:
+        return text.lstrip("#").strip()
+
+    scenes: list[dict[str, object]] = []
+    current_scene: dict[str, object] | None = None
+
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s.startswith(scene_prefix) and (sub_prefix is None or not s.startswith(sub_prefix)):
+            if current_scene is not None:
+                current_scene["end_line"] = i
+                scenes.append(current_scene)
+            title = _strip_heading(s)
+            current_scene = {
+                "title": title,
+                "start_line": i + 1,
+                "end_line": len(lines),
+                "type": "section",
+                "subsections": [],
+                "line_count": 0,
+                "tags": cast(list[str], []),
+            }
+            current_scene["tags"] = _scene_tags(title)
+
+        elif sub_prefix and s.startswith(sub_prefix) and current_scene is not None:
+            sub_title = _strip_heading(s)
+            current_scene["subsections"].append(
+                {"title": sub_title, "line": i + 1, "tags": cast(list[str], [])}
+            )
+            # Per scene_index.py: combat-related H3 subsections append 'combat' to the scene tags
+            combat_sub_kw = ["战斗", "遭遇", "陷阱", "推销", "巡逻"]
+            if any(kw in sub_title for kw in combat_sub_kw):
+                existing = cast(list[str], current_scene["tags"])
+                if "combat" not in existing:
+                    existing.append("combat")
+
+        elif room_prefix and s.startswith(room_prefix) and current_scene is not None:
+            sub_title = _strip_heading(s)
+            current_scene["subsections"].append(
+                {"title": sub_title, "line": i + 1, "type": "room"}
+            )
+
+    if current_scene is not None:
+        current_scene["end_line"] = len(lines)
+        scenes.append(current_scene)
+
+    for scene in scenes:
+        scene["line_count"] = int(scene["end_line"]) - int(scene["start_line"]) + 1
+
+    return scenes
+
+
+def _scene_tags(title: str) -> list[str]:
+    """Assign scene-level tags using the same heuristics as the reference scene_index.py."""
+    title_lower = title.lower()
+
+    intro_kw = ["运作", "运行"]
+    intro_kw_en = ["running the", "how to", "running this", "about this"]
+    if any(kw in title for kw in intro_kw) or any(kw in title_lower for kw in intro_kw_en):
+        return ["intro"]
+
+    combat_kw = ["战斗", "遭遇", "冲突", "攻击", "伏击"]
+    combat_kw_en = ["battle", "fight", "combat", "ambush", "assault", "skirmish"]
+    if any(kw in title for kw in combat_kw) or any(kw in title_lower for kw in combat_kw_en):
+        return ["combat", "encounter"]
+
+    dungeon_kw = ["大厅", "地城", "教堂", "墓", "要塞", "堡垒", "塔", "神殿", "墓穴"]
+    dungeon_kw_en = [
+        "dungeon", "temple", "keep", "fort", "castle", "tower",
+        "cathedral", "crypt",
+    ]
+    if any(kw in title for kw in dungeon_kw) or any(kw in title_lower for kw in dungeon_kw_en):
+        return ["exploration", "dungeon"]
+
+    trans_kw = ["逃出", "离开", "前往", "穿越", "旅行", "出发"]
+    trans_kw_en = ["escape", "depart", "travel", "journey", "road", "toward", "leave"]
+    if any(kw in title for kw in trans_kw) or any(kw in title_lower for kw in trans_kw_en):
+        return ["transition"]
+
+    social_kw = ["小镇", "村庄", "城市", "旅馆", "市场", "广场", "港口", "酒馆"]
+    social_kw_en = ["town", "village", "city", "tavern", "inn", "market", "harbor", "square"]
+    if any(kw in title for kw in social_kw) or any(kw in title_lower for kw in social_kw_en):
+        return ["exploration", "social"]
+
+    return ["exploration"]
 
 
 class ModuleImportService:
@@ -694,3 +818,56 @@ class ModuleImportService:
                 keywords=list(scene.keywords or []),
                 content=content,
             )
+
+    def export_scene_index(
+        self, campaign_id: str, *, output_path: str | Path | None = None
+    ) -> dict[str, object]:
+        """Export all module scenes in the same format as the dnd-dm-skill scenes_index.json.
+
+        Re-parses chapter content with H2/H3/H4 heading logic that matches the
+        reference ``scene_index.py`` parser — H2 boundaries create ``"section"``
+        scenes, H3 headings become untyped sub-sections, and H4 headings become
+        ``"room"`` sub-sections.  Tags follow the same keyword heuristics.
+        """
+        with self.database.transaction() as session:
+            if session.get(Campaign, campaign_id) is None:
+                raise CampaignNotFoundError(f"campaign not found: {campaign_id}")
+            modules = session.scalars(
+                select(ModuleSource)
+                .where(ModuleSource.campaign_id == campaign_id)
+                .order_by(ModuleSource.name, ModuleSource.id)
+            ).all()
+
+            result: dict[str, object] = {
+                "_current_scene": None,
+                "_current_module_file": None,
+            }
+            for module in modules:
+                chapters = session.scalars(
+                    select(ModuleChapter)
+                    .where(ModuleChapter.module_id == module.id)
+                    .order_by(ModuleChapter.order_index, ModuleChapter.id)
+                ).all()
+                for chapter in chapters:
+                    content = chapter.content
+                    lines = content.splitlines(keepends=True)
+                    raw_lines = content.splitlines()
+                    parsed = _parse_scene_index(raw_lines)
+                    store_key = f"{module.name}:{chapter.title}"
+                    result[store_key] = {
+                        "filepath": chapter.source_path,
+                        "total_lines": len(raw_lines),
+                        "scenes": parsed,
+                    }
+                    if result["_current_module_file"] is None:
+                        result["_current_module_file"] = store_key
+
+            if output_path is not None:
+                import json
+
+                output_path = Path(output_path)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(
+                    json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            return result

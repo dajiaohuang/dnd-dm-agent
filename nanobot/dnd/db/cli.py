@@ -135,6 +135,9 @@ def _parser() -> argparse.ArgumentParser:
     module_search.add_argument("--query", required=True)
     module_search.add_argument("--top-k", type=int, default=5)
     module_search.add_argument("--no-dense", action="store_true")
+    module_export = module_commands.add_parser("export-scenes")
+    module_export.add_argument("--campaign", required=True)
+    module_export.add_argument("--output", required=False, help="Optional JSON file path")
 
     save = commands.add_parser("save")
     save_commands = save.add_subparsers(dest="action", required=True)
@@ -288,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
                 _emit(modules.index(args.campaign))
             elif args.action == "scene":
                 _emit(asdict(modules.read_scene(args.campaign, args.scene)))
+            elif args.action == "export-scenes":
+                _emit(modules.export_scene_index(args.campaign, output_path=args.output))
             else:
                 search = ModuleSearchService(database)
                 _emit(
