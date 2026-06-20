@@ -1,60 +1,54 @@
-# 《模组运行结构》（由 init.py 自动生成）
+# 模组运行结构
 
-> 本文件是通用模组弧线参考；实际章节与节点状态存入当前战役数据库。
-> 换模组时由 `init_module()` 重建。
+> 本文件是通用模组弧线参考模板；实际章节与节点状态存储于当前战役数据库。
+> 模组导入后由 `ModuleImportService` 自动建立章节结构与场景索引。
 
 ---
 
 ## 章节加载序列
 
-章节结构将在每次章节过渡时由 `builder.py:build_chapter_content()` 自动追加到本文件。
+章节结构由模组导入时自动建立，通过 `ModuleChapter` 表管理：
 
-### 当前模组
+| 字段 | 说明 |
+|------|------|
+| `chapter_key` | 章节标识（`ch.1`, `ch.2`, `appendix.a` 等） |
+| `status` | `current` / `locked` / `reference` |
+| `order_index` | 章节排序 |
 
-（在此执行规则0a 模组选择后填充以下内容）
-
-| 章节 | 文件 | 等级范围 | 状态 |
-|------|------|:--------:|:----:|
-| Ch.1 | 第一章文件 | 从文件扫描 | 当前 |
-| Ch.2 | 第二章文件 | 从文件扫描 | 🔒 |
-| ... | ... | ... | 🔒 |
+切换当前章节通过 `ModuleProgressService.set_scene()` 自动更新章节状态。
 
 ---
 
 ## 关键节点清单
 
-由 `builder.build_chapter_content()` 在每次章节过渡时追加。
-
-| 编号 | 节点名 | 章节 | 触发条件 | 状态 |
-|:----:|--------|:----:|----------|:----:|
-| K1 | [首个关键节点] | Ch.1 | [模组定义的条件] | 🔒未解锁 |
+关键节点由 DM 在运行中通过 `CampaignEvent` 记录，不在本文件硬编码。
 
 ---
 
 ## 事件流程图
 
-由 `builder.build_chapter_content()` 在每次章节过渡时追加。
+事件由 `CampaignEventService` 管理，存储于 `campaign_events` 表。
+每次存档时完整保留。
 
 ---
 
 ## 等级与升级里程碑
 
-| 关键事件 | 升级 | 说明 |
-|---------|:----:|------|
-| 起始 | Lv.1 | 模组起始等级 |
-| 里程碑事件1 | Lv.X | 由模组定义 |
+角色等级与经验值存储于 `Character` 表的 `sheet_json` 和 `xp` 字段，
+通过 `CharacterService` 管理。
 
 ---
 
 ## 跨章节NPC命运
 
-> 各章节共用的 NPC 命运由当前 `campaign_id` 的世界状态维护。
-
-| NPC | 首次出现 | 模组剧本中的命运 |
-|-----|---------|----------------|
+NPC 状态由当前 `campaign_id` 的 `WorldState.state_json` 维护。
+存档时完整捕获。
 
 ---
 
 ## 存档剧情快照
 
-（每次存档时更新，见规则14.6）
+通过 `CampaignSnapshotService` 管理。每次存档时调用 `save create`：
+```powershell
+python -m nanobot.dnd.db.cli save create --campaign <id> --label "<描述>"
+```

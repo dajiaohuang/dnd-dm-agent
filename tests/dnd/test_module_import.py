@@ -49,7 +49,7 @@ def test_module_import_builds_chapters_and_scene_indexes(tmp_path: Path) -> None
             "one", module_dir, name="Avernus", embed=False
         )
         assert imported.chapter_count == 2
-        assert imported.scene_count == 3
+        assert imported.scene_count == 5  # +2 preamble scenes ("Arrival", "Road")
         assert imported.is_active is True
         with database.transaction() as session:
             chapters = list(
@@ -60,8 +60,15 @@ def test_module_import_builds_chapters_and_scene_indexes(tmp_path: Path) -> None
             assert [chapter.chapter_key for chapter in chapters] == ["ch.1", "ch.2"]
             assert [chapter.status for chapter in chapters] == ["current", "locked"]
             scenes = list(session.scalars(select(SceneIndex).order_by(SceneIndex.title)))
-            assert [scene.title for scene in scenes] == ["Gate", "Journey", "Tavern"]
-            gate_id = scenes[0].id
+            assert [scene.title for scene in scenes] == [
+                "Arrival",
+                "Gate",
+                "Journey",
+                "Road",
+                "Tavern",
+            ]
+            gate_scene = next(s for s in scenes if s.title == "Gate")
+            gate_id = gate_scene.id
             assert chapters[0].content.startswith("# Arrival")
         gate = ModuleImportService(database).read_scene("one", gate_id)
         assert gate.scene_title == "Gate"
@@ -172,5 +179,102 @@ def test_pdf_attachment_is_converted_before_module_import(tmp_path: Path) -> Non
         assert converted_paths == [pdf]
         with database.transaction() as session:
             assert "Converted PDF content" in session.scalar(select(ModuleChapter)).content
+    finally:
+        database.dispose()
+
+
+def test_export_scene_index_matches_imported_structure(tmp_path: Path) -> None:
+    module_dir = tmp_path / "emod"
+    module_dir.mkdir()
+    (module_dir / "Ch.1 Gate.md").write_text(
+        "# Arrival\n\n## Gate\nDescription.\n\n### Guard\nDetails.\n\n## Tavern\nTalk.\n",
+        encoding="utf-8",
+    )
+    database = Database(sqlite_database_url(tmp_path / "exp2.db"))
+    database.upgrade_schema()
+    try:
+        CampaignService(database).create("Campaign", campaign_id="one")
+        ModuleImportService(database).import_path(
+            "one", module_dir, name="Avernus", embed=False
+        )
+        exported = ModuleImportService(database).export_scene_index("one")
+        store_key = next(k for k in exported if not k.startswith("_"))
+        scenes = exported[store_key]["scenes"]
+        assert len(scenes) >= 2
+        assert all("title" in s and "start_line" in s and "type" in s for s in scenes)
+        assert all("tags" in s and "line_count" in s for s in scenes)
+        titles = [s["title"] for s in scenes]
+        assert "Arrival" in titles
+    finally:
+        database.dispose()
+
+
+def test_module_delete_removes_from_campaign(tmp_path: Path) -> None:
+    module_dir = tmp_path / "mdel"
+    module_dir.mkdir()
+    (module_dir / "Ch.1.md").write_text("# One\n\n## Gate\nDesc.\n", encoding="utf-8")
+    database = Database(sqlite_database_url(tmp_path / "mdel.db"))
+    database.upgrade_schema()
+    try:
+        CampaignService(database).create("Campaign", campaign_id="one")
+        imported = ModuleImportService(database).import_path(
+            "one", module_dir, name="ModA", embed=False
+        )
+        ModuleImportService(database).delete("one", imported.id)
+        assert len(ModuleImportService(database).list("one")) == 0
+    finally:
+        database.dispose()
+
+
+def test_module_set_active_and_rename(tmp_path: Path) -> None:
+    database = Database(sqlite_database_url(tmp_path / "mact.db"))
+    database.upgrade_schema()
+    chapter = tmp_path / "Ch.1.md"
+    chapter.write_text("# One\n\n## Gate\nDesc.\n", encoding="utf-8")
+    try:
+        CampaignService(database).create("Campaign", campaign_id="one")
+        imported = ModuleImportService(database).import_path(
+            "one", chapter, name="ModA", embed=False
+        )
+        assert imported.is_active is True
+        info = ModuleImportService(database).set_active("one", imported.id, active=False)
+        assert info.is_active is False
+        info = ModuleImportService(database).set_active("one", imported.id, active=True)
+        assert info.is_active is True
+        renamed = ModuleImportService(database).rename("one", imported.id, "NewName")
+        assert renamed.name == "NewName"
+    finally:
+        database.dispose()
+
+
+def test_campaign_delete_cascades(tmp_path: Path) -> None:
+    database = Database(sqlite_database_url(tmp_path / "cdel.db"))
+    database.upgrade_schema()
+    chapter = tmp_path / "Ch.1.md"
+    chapter.write_text("# One\n\n## Gate\nDesc.\n", encoding="utf-8")
+    try:
+        CampaignService(database).create("Campaign", campaign_id="one")
+        ModuleImportService(database).import_path("one", chapter, name="ModA", embed=False)
+        CampaignSnapshotService(database).create("one", label="test")
+        CampaignService(database).delete("one")
+        assert len(CampaignService(database).list()) == 0
+    finally:
+        database.dispose()
+
+
+def test_snapshot_delete_and_export(tmp_path: Path) -> None:
+    database = Database(sqlite_database_url(tmp_path / "snp.db"))
+    database.upgrade_schema()
+    try:
+        CampaignService(database).create("Campaign", campaign_id="one")
+        snapshots = CampaignSnapshotService(database)
+        saved = snapshots.create("one", label="test")
+        assert len(snapshots.list("one")) == 1
+        out = tmp_path / "export.json"
+        payload = snapshots.export("one", saved.slot, out)
+        assert out.exists()
+        assert payload["campaign_id"] == "one"
+        snapshots.delete("one", saved.slot)
+        assert len(snapshots.list("one")) == 0
     finally:
         database.dispose()

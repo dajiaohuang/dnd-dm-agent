@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from nanobot.dnd.db.campaigns import CampaignNotFoundError
 from nanobot.dnd.db.database import Database
@@ -24,6 +24,12 @@ from nanobot.dnd.db.models import (
 )
 from nanobot.dnd.modules.chunking import parse_module_markdown
 from nanobot.dnd.modules.pdf_parser import convert_pdf_to_markdown, page_for_offset
+from nanobot.dnd.modules.scene_utils import (
+    detect_scene_heading_level,
+    heading_prefix,
+    merge_bilingual_scenes,
+    preamble_title,
+)
 from nanobot.dnd.rules.embedding import BgeM3Embedder, Embedder
 
 DEFAULT_EMBEDDING_MODEL_ID = "embedding-bge-m3"
@@ -248,25 +254,9 @@ def _tags(title: str) -> list[str]:
 
 def _scenes(lines: list[str]) -> list[dict[str, object]]:
     """Split lines into scenes; auto-detect heading level for scene boundaries."""
-    _h_counts = {
-        level: sum(
-            1
-            for l in lines
-            if l.startswith(level * "#" + " ") and not l.startswith((level + 1) * "#")
-        )
-        for level in (2, 3, 4)
-    }
-    if _h_counts[2] > 0 and _h_counts[3] >= _h_counts[2] * 5:
-        scene_level = 3
-    elif _h_counts[2] > 0:
-        scene_level = 2
-    elif _h_counts[3] > 0:
-        scene_level = 3
-    else:
-        scene_level = 4
-    sub_level = scene_level + 1 if scene_level < 4 else None
-    scene_prefix = scene_level * "#" + " "
-    sub_prefix = sub_level * "#" + " " if sub_level else None
+    scene_level, sub_level, _room_level = detect_scene_heading_level(lines)
+    scene_prefix = heading_prefix(scene_level)
+    sub_prefix = heading_prefix(sub_level) if sub_level else None
 
     starts = [index for index, line in enumerate(lines) if line.startswith(scene_prefix)]
     if not starts and lines:
@@ -298,77 +288,32 @@ def _scenes(lines: list[str]) -> list[dict[str, object]]:
             }
         )
 
-    # Capture preamble before the first scene heading (same logic as _parse_scene_index)
+    # Preamble before the first scene heading
     if scenes and int(scenes[0]["start_line"]) > 1:
-        preamble_end = int(scenes[0]["start_line"]) - 1
-        preamble_lines = lines[:preamble_end]
-        preamble_title = ""
-        for pline in preamble_lines:
-            ps = pline.strip()
-            if ps.startswith("#") and ps.lstrip("#").strip():
-                preamble_title = ps.lstrip("#").strip()
-                break
-        if not preamble_title:
-            for pline in preamble_lines:
-                if pline.strip() and not pline.strip().startswith("<!--"):
-                    preamble_title = pline.strip()[:80]
-                    break
-        if not preamble_title:
-            preamble_title = "Chapter Intro"
-        preamble_headings = [
+        pend = int(scenes[0]["start_line"]) - 1
+        ptitle = preamble_title(lines, pend)
+        pheadings = [
             l.lstrip("# ").strip()
-            for l in preamble_lines
+            for l in lines[:pend]
             if sub_prefix and l.startswith(sub_prefix)
         ]
         scenes.insert(
             0,
             {
-                "title": preamble_title,
+                "title": ptitle,
                 "start_line": 1,
-                "end_line": preamble_end,
-                "headings": preamble_headings,
-                "keywords": _tags(preamble_title),
+                "end_line": pend,
+                "headings": pheadings,
+                "keywords": _tags(ptitle),
             },
         )
 
-    # Merge adjacent empty scenes (same bilingual-split fix as _parse_scene_index)
-    _CJK_RANGE2 = (("一", "鿿"), ("㐀", "䶿"), ("豈", "﫿"))
-
-    def _has_cjk2(text: str) -> bool:
-        return any(lo <= c <= hi for lo, hi in _CJK_RANGE2 for c in text)
-
-    def _has_ascii2(text: str) -> bool:
-        return bool(re.search(r"[A-Za-z]{2,}", text))
-
-    merged_scenes: list[dict[str, object]] = []
-    j = 0
-    while j < len(scenes):
-        scene = scenes[j]
-        content_lines = int(scene["end_line"]) - int(scene["start_line"])
-        if content_lines <= 1 and j + 1 < len(scenes):
-            nxt = scenes[j + 1]
-            cur_cjk2 = _has_cjk2(str(scene["title"]))
-            cur_asc2 = _has_ascii2(str(scene["title"]))
-            nxt_cjk2 = _has_cjk2(str(nxt["title"]))
-            nxt_asc2 = _has_ascii2(str(nxt["title"]))
-            if (cur_cjk2 and not cur_asc2 and nxt_asc2 and not nxt_cjk2) or (
-                cur_asc2 and not cur_cjk2 and nxt_cjk2 and not nxt_asc2
-            ):
-                nxt["title"] = str(scene["title"]) + " " + str(nxt["title"])
-                nxt["start_line"] = scene["start_line"]
-                nxt["headings"] = list(scene["headings"]) + list(nxt["headings"])
-                nxt["keywords"] = list(
-                    dict.fromkeys(
-                        cast(list[str], scene.get("keywords", []))
-                        + cast(list[str], nxt.get("keywords", []))
-                    )
-                )
-                j += 1
-                scene = nxt
-        merged_scenes.append(scene)
-        j += 1
-
-    return merged_scenes
+    # Merge adjacent empty scenes (bilingual-split fix)
+    return merge_bilingual_scenes(
+        scenes,
+        subs_key="headings",
+        tags_key="keywords",
+    )
 
 
 def _parse_scene_index(lines: list[str]) -> list[dict[str, object]]:
@@ -382,27 +327,10 @@ def _parse_scene_index(lines: list[str]) -> list[dict[str, object]]:
     Tags follow the same English + Chinese keyword heuristics as the reference
     ``scene_index.py``.
     """
-    _h_counts = {
-        level: sum(1 for l in lines if l.startswith(level * "#" + " ") and not l.startswith((level + 1) * "#"))
-        for level in (2, 3, 4)
-    }
-    # Auto-detect scene heading level.  When the next-lower heading level
-    # outnumbers H2 by ≥5× it is the real structural level (common in PDF
-    # conversions where H2 is used only for top-level bookmarks).
-    if _h_counts[2] > 0 and _h_counts[3] >= _h_counts[2] * 5:
-        scene_level = 3
-    elif _h_counts[2] > 0:
-        scene_level = 2
-    elif _h_counts[3] > 0:
-        scene_level = 3
-    else:
-        scene_level = 4
-    sub_level = scene_level + 1 if scene_level < 4 else None
-    room_level = scene_level + 2 if scene_level < 3 else None
-
-    scene_prefix = scene_level * "#" + " "
-    sub_prefix = sub_level * "#" + " " if sub_level else None
-    room_prefix = room_level * "#" + " " if room_level else None
+    scene_level, sub_level, room_level = detect_scene_heading_level(lines)
+    scene_prefix = heading_prefix(scene_level)
+    sub_prefix = heading_prefix(sub_level) if sub_level else None
+    room_prefix = heading_prefix(room_level) if room_level else None
 
     def _strip_heading(text: str) -> str:
         return text.lstrip("#").strip()
@@ -433,7 +361,6 @@ def _parse_scene_index(lines: list[str]) -> list[dict[str, object]]:
             current_scene["subsections"].append(
                 {"title": sub_title, "line": i + 1, "tags": cast(list[str], [])}
             )
-            # Per scene_index.py: combat-related H3 subsections append 'combat' to the scene tags
             combat_sub_kw = ["战斗", "遭遇", "陷阱", "推销", "巡逻"]
             if any(kw in sub_title for kw in combat_sub_kw):
                 existing = cast(list[str], current_scene["tags"])
@@ -450,103 +377,27 @@ def _parse_scene_index(lines: list[str]) -> list[dict[str, object]]:
         current_scene["end_line"] = len(lines)
         scenes.append(current_scene)
 
-    # ---- capture preamble before the first scene heading ----
-    # When scene_level is raised (e.g. H3 instead of H2), higher-level
-    # headings near the top may not start a scene.  Grab lines before the
-    # first scene as an intro scene, using the first available heading as
-    # its title.
+    # Preamble before the first scene heading
     if scenes and int(scenes[0]["start_line"]) > 1:
-        preamble_end = int(scenes[0]["start_line"]) - 1
-        preamble_lines = lines[:preamble_end]
-        # Find the first heading of any level to use as the title
-        preamble_title = ""
-        for pline in preamble_lines:
-            ps = pline.strip()
-            if ps.startswith("#") and ps.lstrip("#").strip():
-                preamble_title = ps.lstrip("#").strip()
-                break
-        if not preamble_title:
-            # Grab the first non-blank line as a fallback
-            for pline in preamble_lines:
-                if pline.strip() and not pline.strip().startswith("<!--"):
-                    preamble_title = pline.strip()[:80]
-                    break
-        if not preamble_title:
-            preamble_title = "Chapter Intro"
-        preamble_scene: dict[str, object] = {
-            "title": preamble_title,
-            "start_line": 1,
-            "end_line": preamble_end,
-            "type": "section",
-            "subsections": [],
-            "line_count": preamble_end,
-            "tags": _scene_tags(preamble_title),
-        }
-        scenes.insert(0, preamble_scene)
+        pend = int(scenes[0]["start_line"]) - 1
+        ptitle = preamble_title(lines, pend)
+        scenes.insert(
+            0,
+            {
+                "title": ptitle,
+                "start_line": 1,
+                "end_line": pend,
+                "type": "section",
+                "subsections": [],
+                "line_count": pend,
+                "tags": _scene_tags(ptitle),
+            },
+        )
 
     for scene in scenes:
         scene["line_count"] = int(scene["end_line"]) - int(scene["start_line"]) + 1
 
-    # ---- merge adjacent heading-only scenes (PDF bilingual split fix) ----
-    # The PDF parser sometimes emits ``## Chinese`` / ``## English`` as two
-    # consecutive headings with no body content in between.  Those produce
-    # scenes with line_count ≤ 2 (heading + blank line).  Merge them into the
-    # following scene so the result matches the single-heading expectation.
-    _CJK_RANGE = (
-        ("一", "鿿"),
-        ("㐀", "䶿"),
-        ("豈", "﫿"),
-    )
-
-    def _has_cjk(text: str) -> bool:
-        return any(lo <= c <= hi for lo, hi in _CJK_RANGE for c in text)
-
-    def _has_ascii_alpha(text: str) -> bool:
-        return bool(re.search(r"[A-Za-z]{2,}", text))
-
-    merged: list[dict[str, object]] = []
-    i = 0
-    while i < len(scenes):
-        scene = scenes[i]
-        # A scene with line_count ≤ 2 has no body content — only the heading
-        # line and possibly one blank line.  If the next scene exists, fold
-        # this one's title and sub-sections into it.
-        if scene["line_count"] <= 2 and i + 1 < len(scenes):
-            next_scene = scenes[i + 1]
-            # Heuristic: merge only when one is CJK-dominant and the other ASCII
-            # to avoid flattening genuinely distinct short sections.
-            cur_cjk = _has_cjk(str(scene["title"]))
-            cur_asc = _has_ascii_alpha(str(scene["title"]))
-            nxt_cjk = _has_cjk(str(next_scene["title"]))
-            nxt_asc = _has_ascii_alpha(str(next_scene["title"]))
-            complementary = (cur_cjk and not cur_asc and nxt_asc and not nxt_cjk) or (
-                cur_asc and not cur_cjk and nxt_cjk and not nxt_asc
-            )
-            if complementary:
-                next_scene["title"] = (
-                    str(scene["title"]) + " " + str(next_scene["title"])
-                )
-                next_scene["start_line"] = scene["start_line"]
-                # Prepend any sub-sections from the empty heading
-                next_scene["subsections"] = (
-                    list(scene["subsections"]) + list(next_scene["subsections"])
-                )
-                next_scene["line_count"] = (
-                    int(next_scene["end_line"]) - int(next_scene["start_line"]) + 1
-                )
-                # Merge tags
-                next_scene["tags"] = list(
-                    dict.fromkeys(
-                        cast(list[str], scene.get("tags", []))
-                        + cast(list[str], next_scene.get("tags", []))
-                    )
-                )
-                i += 1
-                scene = next_scene
-        merged.append(scene)
-        i += 1
-
-    return merged
+    return merge_bilingual_scenes(scenes)
 
 
 def _scene_tags(title: str) -> list[str]:
@@ -882,43 +733,7 @@ class ModuleImportService:
                     .order_by(ModuleSource.created_at, ModuleSource.id)
                 )
             )
-            result: list[ModuleInfo] = []
-            for module in modules:
-                chapters = list(
-                    session.scalars(
-                        select(ModuleChapter).where(ModuleChapter.module_id == module.id)
-                    )
-                )
-                chapter_ids = [chapter.id for chapter in chapters]
-                scenes = (
-                    list(
-                        session.scalars(
-                            select(SceneIndex).where(SceneIndex.chapter_id.in_(chapter_ids))
-                        )
-                    )
-                    if chapter_ids
-                    else []
-                )
-                chunks = list(
-                    session.scalars(
-                        select(ModuleChunk).where(ModuleChunk.module_id == module.id)
-                    )
-                )
-                result.append(
-                    ModuleInfo(
-                        id=module.id,
-                        campaign_id=campaign_id,
-                        name=module.name,
-                        source_path=module.source_path,
-                        checksum=module.checksum,
-                        is_active=module.is_active,
-                        chapter_count=len(chapters),
-                        scene_count=len(scenes),
-                        chunk_count=len(chunks),
-                        embeddings=sum(chunk.embedding_json is not None for chunk in chunks),
-                    )
-                )
-            return result
+            return [self._module_info(session, m, campaign_id) for m in modules]
 
     def index(self, campaign_id: str) -> list[dict[str, object]]:
         with self.database.transaction() as session:
@@ -969,6 +784,102 @@ class ModuleImportService:
                     }
                 )
             return result
+
+    def delete(self, campaign_id: str, module_id: str) -> None:
+        """Delete a module and all its chapters, scenes, chunks, and embeddings."""
+        with self.database.transaction() as session:
+            if session.get(Campaign, campaign_id) is None:
+                raise CampaignNotFoundError(f"campaign not found: {campaign_id}")
+            module = session.get(ModuleSource, module_id)
+            if module is None or module.campaign_id != campaign_id:
+                raise ModuleImportError(
+                    f"module not found in campaign {campaign_id}: {module_id}"
+                )
+            session.delete(module)
+
+    def set_active(self, campaign_id: str, module_id: str, *, active: bool) -> ModuleInfo:
+        """Activate or deactivate a module."""
+        with self.database.transaction() as session:
+            if session.get(Campaign, campaign_id) is None:
+                raise CampaignNotFoundError(f"campaign not found: {campaign_id}")
+            module = session.get(ModuleSource, module_id)
+            if module is None or module.campaign_id != campaign_id:
+                raise ModuleImportError(
+                    f"module not found in campaign {campaign_id}: {module_id}"
+                )
+            if active and not module.is_active:
+                for other in session.scalars(
+                    select(ModuleSource).where(ModuleSource.campaign_id == campaign_id)
+                ):
+                    other.is_active = False
+            module.is_active = active
+            session.flush()
+            return self._module_info(session, module, campaign_id)
+
+    def rename(self, campaign_id: str, module_id: str, name: str) -> ModuleInfo:
+        """Rename a module subject to the per-campaign unique constraint."""
+        name = name.strip()
+        if not name:
+            raise ValueError("module name must not be empty")
+        with self.database.transaction() as session:
+            if session.get(Campaign, campaign_id) is None:
+                raise CampaignNotFoundError(f"campaign not found: {campaign_id}")
+            module = session.get(ModuleSource, module_id)
+            if module is None or module.campaign_id != campaign_id:
+                raise ModuleImportError(
+                    f"module not found in campaign {campaign_id}: {module_id}"
+                )
+            existing = session.scalar(
+                select(ModuleSource).where(
+                    ModuleSource.campaign_id == campaign_id,
+                    ModuleSource.name == name,
+                    ModuleSource.id != module_id,
+                )
+            )
+            if existing is not None:
+                raise ModuleAlreadyExistsError(
+                    f"module already exists in campaign {campaign_id}: {name}"
+                )
+            module.name = name
+            session.flush()
+            return self._module_info(session, module, campaign_id)
+
+    @staticmethod
+    def _module_info(session: Any, module: ModuleSource, campaign_id: str) -> ModuleInfo:
+        chapters = list(
+            session.scalars(
+                select(ModuleChapter).where(ModuleChapter.module_id == module.id)
+            )
+        )
+        chapter_ids = [c.id for c in chapters]
+        scene_count = (
+            session.scalar(
+                select(func.count()).where(SceneIndex.chapter_id.in_(chapter_ids))
+            )
+            if chapter_ids
+            else 0
+        )
+        chunk_count = session.scalar(
+            select(func.count()).where(ModuleChunk.module_id == module.id)
+        )
+        embedding_count = session.scalar(
+            select(func.count()).where(
+                ModuleChunk.module_id == module.id,
+                ModuleChunk.embedding_json.isnot(None),
+            )
+        )
+        return ModuleInfo(
+            id=module.id,
+            campaign_id=campaign_id,
+            name=module.name,
+            source_path=module.source_path,
+            checksum=module.checksum,
+            is_active=module.is_active,
+            chapter_count=len(chapters),
+            scene_count=scene_count or 0,
+            chunk_count=chunk_count or 0,
+            embeddings=embedding_count or 0,
+        )
 
     def read_scene(self, campaign_id: str, scene_id: str) -> SceneContentInfo:
         with self.database.transaction() as session:

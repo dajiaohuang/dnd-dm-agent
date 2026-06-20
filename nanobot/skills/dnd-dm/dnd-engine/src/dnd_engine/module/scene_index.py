@@ -1,6 +1,13 @@
 """
 场景级模块索引：将章节文件拆分为按场景行号索引，实现按需懒加载
 """
+
+DEPRECATED: file-based persistence. Use the campaign database instead.
+
+This module exists only for backward compatibility with older dnd-engine
+workflows. NanoBot stores all campaign state in the SQL database via
+CampaignSnapshotService / CampaignService / ModuleProgressService.
+No new code should call this module.
 import os
 import re
 import json

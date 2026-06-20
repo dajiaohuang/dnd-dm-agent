@@ -1,6 +1,13 @@
 """
 模组内容预加载缓存 —— 避免 LLM 反复读取文件
 """
+
+DEPRECATED: file-based persistence. Use the campaign database instead.
+
+This module exists only for backward compatibility with older dnd-engine
+workflows. NanoBot stores all campaign state in the SQL database via
+CampaignSnapshotService / CampaignService / ModuleProgressService.
+No new code should call this module.
 import os
 import json
 import re

@@ -1,6 +1,13 @@
 """
 模组文件扫描与解析函数库
 """
+
+DEPRECATED: file-based persistence. Use the campaign database instead.
+
+This module exists only for backward compatibility with older dnd-engine
+workflows. NanoBot stores all campaign state in the SQL database via
+CampaignSnapshotService / CampaignService / ModuleProgressService.
+No new code should call this module.
 import os
 import re
 

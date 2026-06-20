@@ -21,7 +21,16 @@ from nanobot.dnd.db.models import (
     ToolAudit,
     WorldState,
 )
-from nanobot.dnd.db.module_content import ModuleImportError
+class ModuleProgressError(RuntimeError):
+    """Base error for campaign progress operations."""
+
+
+class SceneNotFoundError(ModuleProgressError):
+    """The requested scene was not found in any active module."""
+
+
+class ChapterLockedError(ModuleProgressError):
+    """The scene's chapter is locked and cannot be progressed into."""
 
 
 @dataclass(frozen=True)
@@ -75,12 +84,12 @@ class ModuleProgressService:
                 )
             ).first()
             if row is None:
-                raise ModuleImportError(
+                raise SceneNotFoundError(
                     f"scene not found in active module for campaign {campaign_id}: {scene_id}"
                 )
             scene, chapter, module = row
             if chapter.status == "locked":
-                raise ModuleImportError(f"chapter is locked: {chapter.chapter_key}")
+                raise ChapterLockedError(f"chapter is locked: {chapter.chapter_key}")
 
             world = session.scalar(
                 select(WorldState).where(WorldState.campaign_id == campaign_id)

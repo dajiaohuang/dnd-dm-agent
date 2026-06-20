@@ -7,6 +7,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import delete, func, select
@@ -35,12 +36,11 @@ SNAPSHOT_SCHEMA_VERSION = 3
 SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS = {2, SNAPSHOT_SCHEMA_VERSION}
 
 
+from nanobot.dnd.db.campaigns import CampaignNotFoundError
+
+
 class SnapshotError(RuntimeError):
     """Base error for campaign snapshot operations."""
-
-
-class CampaignNotFoundError(SnapshotError):
-    """The requested campaign does not exist."""
 
 
 class SnapshotNotFoundError(SnapshotError):
@@ -344,6 +344,22 @@ class CampaignSnapshotService:
                 )
             )
             return RestoreResult(campaign_id, slot, audit_id, revision_version)
+
+    def delete(self, campaign_id: str, slot: int) -> None:
+        with self.database.transaction() as session:
+            self._campaign(session, campaign_id)
+            save = self._save(session, campaign_id, slot)
+            session.delete(save)
+
+    def export(self, campaign_id: str, slot: int, output_path: str | Path) -> dict[str, Any]:
+        payload = self.get(campaign_id, slot)
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        return payload
 
     @classmethod
     def capture_from_session(cls, session: Session, campaign_id: str) -> dict[str, Any]:

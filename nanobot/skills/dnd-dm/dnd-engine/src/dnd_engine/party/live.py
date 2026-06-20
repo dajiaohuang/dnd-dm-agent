@@ -1,6 +1,13 @@
 """
 角色状态实时管理：live_party.json 读写
 """
+
+DEPRECATED: file-based persistence. Use the campaign database instead.
+
+This module exists only for backward compatibility with older dnd-engine
+workflows. NanoBot stores all campaign state in the SQL database via
+CampaignSnapshotService / CampaignService / ModuleProgressService.
+No new code should call this module.
 import json
 import os
 from datetime import datetime

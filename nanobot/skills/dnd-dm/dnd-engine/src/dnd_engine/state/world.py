@@ -1,6 +1,13 @@
 """
 世界状态管理：派系关系、任务进度、已发现地点、关键NPC状态
 """
+
+DEPRECATED: file-based persistence. Use the campaign database instead.
+
+This module exists only for backward compatibility with older dnd-engine
+workflows. NanoBot stores all campaign state in the SQL database via
+CampaignSnapshotService / CampaignService / ModuleProgressService.
+No new code should call this module.
 import json
 import os
 

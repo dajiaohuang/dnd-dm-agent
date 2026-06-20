@@ -5,6 +5,13 @@
   - get_combat_table() / build_combat_table（展示层，不在引擎）
   - new_combat() 中未使用的 display import
 """
+
+DEPRECATED: file-based persistence. Use the campaign database instead.
+
+This module exists only for backward compatibility with older dnd-engine
+workflows. NanoBot stores all campaign state in the SQL database via
+CampaignSnapshotService / CampaignService / ModuleProgressService.
+No new code should call this module.
 import json
 import os
 from datetime import datetime

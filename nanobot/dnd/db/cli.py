@@ -78,6 +78,8 @@ def _parser() -> argparse.ArgumentParser:
     status = campaign_commands.add_parser("status")
     status.add_argument("--campaign", required=True)
     status.add_argument("--set", required=True, choices=("active", "archived"))
+    delete_cmd = campaign_commands.add_parser("delete", help="Delete a campaign and all its data")
+    delete_cmd.add_argument("--campaign", required=True)
 
     character = commands.add_parser("character")
     character_commands = character.add_subparsers(dest="action", required=True)
@@ -138,6 +140,15 @@ def _parser() -> argparse.ArgumentParser:
     module_export = module_commands.add_parser("export-scenes")
     module_export.add_argument("--campaign", required=True)
     module_export.add_argument("--output", required=False, help="Optional JSON file path")
+    module_delete_cmd = module_commands.add_parser("delete", help="Delete a module and its data")
+    module_delete_cmd.add_argument("--campaign", required=True)
+    module_delete_cmd.add_argument("--module", required=True, help="Module ID")
+    module_deact = module_commands.add_parser("deactivate", help="Deactivate a module")
+    module_deact.add_argument("--campaign", required=True)
+    module_deact.add_argument("--module", required=True)
+    module_act = module_commands.add_parser("activate", help="Activate a module")
+    module_act.add_argument("--campaign", required=True)
+    module_act.add_argument("--module", required=True)
 
     save = commands.add_parser("save")
     save_commands = save.add_subparsers(dest="action", required=True)
@@ -158,6 +169,13 @@ def _parser() -> argparse.ArgumentParser:
     save_load.add_argument("--session")
     save_load.add_argument("--request")
     save_load.add_argument("--workspace")
+    save_delete_cmd = save_commands.add_parser("delete", help="Delete a snapshot slot")
+    save_delete_cmd.add_argument("--campaign", required=True)
+    save_delete_cmd.add_argument("--slot", required=True, type=int)
+    save_export_cmd = save_commands.add_parser("export", help="Export a snapshot to JSON")
+    save_export_cmd.add_argument("--campaign", required=True)
+    save_export_cmd.add_argument("--slot", required=True, type=int)
+    save_export_cmd.add_argument("--output", required=True, help="Output JSON file path")
 
     undo = commands.add_parser("undo")
     undo.add_argument("--campaign", required=True)
@@ -224,9 +242,13 @@ def main(argv: list[str] | None = None) -> int:
                 result = campaigns.list(status=args.status)
             elif args.action == "show":
                 result = campaigns.get(args.campaign)
+            elif args.action == "delete":
+                campaigns.delete(args.campaign)
+                _emit({"deleted": args.campaign})
             else:
                 result = campaigns.set_status(args.campaign, args.set)
-            _emit(asdict(result) if not isinstance(result, list) else [asdict(x) for x in result])
+            if args.action != "delete":
+                _emit(asdict(result) if not isinstance(result, list) else [asdict(x) for x in result])
         elif args.area == "character":
             if args.action == "create":
                 if args.sheet_file:
@@ -293,6 +315,13 @@ def main(argv: list[str] | None = None) -> int:
                 _emit(asdict(modules.read_scene(args.campaign, args.scene)))
             elif args.action == "export-scenes":
                 _emit(modules.export_scene_index(args.campaign, output_path=args.output))
+            elif args.action == "delete":
+                modules.delete(args.campaign, args.module)
+                _emit({"deleted": args.module})
+            elif args.action == "deactivate":
+                _emit(asdict(modules.set_active(args.campaign, args.module, active=False)))
+            elif args.action == "activate":
+                _emit(asdict(modules.set_active(args.campaign, args.module, active=True)))
             else:
                 search = ModuleSearchService(database)
                 _emit(
@@ -330,6 +359,19 @@ def main(argv: list[str] | None = None) -> int:
                         "campaign_id": payload["campaign_id"],
                         "schema_version": payload["schema_version"],
                         "captured_at": payload["captured_at"],
+                    }
+                )
+            elif args.action == "delete":
+                snapshots.delete(args.campaign, args.slot)
+                _emit({"deleted": True, "campaign_id": args.campaign, "slot": args.slot})
+            elif args.action == "export":
+                payload = snapshots.export(args.campaign, args.slot, args.output)
+                _emit(
+                    {
+                        "exported": True,
+                        "campaign_id": payload["campaign_id"],
+                        "slot": args.slot,
+                        "output": args.output,
                     }
                 )
             else:

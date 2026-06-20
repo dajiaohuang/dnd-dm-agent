@@ -120,7 +120,7 @@ class DndModuleTool(Tool):
                 name=module_name,
                 embed=dense,
             )
-            self.search_service._dense_cache.clear()
+            self.search_service.clear_cache()
             return asdict(result)
         if action == "index":
             if not resolved_campaign:

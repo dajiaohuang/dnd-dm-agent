@@ -170,6 +170,13 @@ class CampaignService:
             session.flush()
             return self._info(campaign)
 
+    def delete(self, campaign_id: str) -> None:
+        with self.database.transaction() as session:
+            campaign = session.get(Campaign, campaign_id)
+            if campaign is None:
+                raise CampaignNotFoundError(f"campaign not found: {campaign_id}")
+            session.delete(campaign)
+
     @staticmethod
     def _info(campaign: Campaign) -> CampaignInfo:
         return CampaignInfo(

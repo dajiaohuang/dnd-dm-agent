@@ -46,6 +46,10 @@ class ModuleSearchService:
         self.embedder = embedder
         self._dense_cache: dict[str, tuple[list[str], np.ndarray]] = {}
 
+    def clear_cache(self) -> None:
+        """Invalidate the in-memory dense-vector cache."""
+        self._dense_cache.clear()
+
     def search(
         self,
         query: str,
