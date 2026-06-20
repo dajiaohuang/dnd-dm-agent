@@ -14,17 +14,17 @@ Write-Host "=== dnd-dm-agent ===" -ForegroundColor Cyan
 
 # ---------- NapCat QQ ----------
 if (-not $NoQQ) {
-    $LocalQQ = Join-Path $RepoRoot "napcat_localqq"
-    $StartBat = Join-Path $LocalQQ "start.bat"
-
-    if (-not (Test-Path $StartBat)) {
-        Write-Host "[!] NapCat not set up. Run: .\scripts\setup-napcat.ps1" -ForegroundColor Red
+    $LocalQQ = Get-ChildItem -Directory -Path $RepoRoot -Filter "*_localqq" |
+        Select-Object -First 1
+    if (-not $LocalQQ) {
+        Write-Host "[!] No *_localqq directory. Run: .\scripts\setup-napcat.ps1" -ForegroundColor Red
         Write-Host "    Or skip QQ with: .\scripts\start-all.ps1 -NoQQ" -ForegroundColor Yellow
         exit 1
     }
+    $LocalQQ = $LocalQQ.FullName
 
     $QQRunning = Get-Process -Name "QQ" -ErrorAction SilentlyContinue |
-        Where-Object { $_.Path -like "*napcat_localqq*" }
+        Where-Object { $_.Path -like "*_localqq*" }
 
     if (-not $QQRunning) {
         if ($Quick) {

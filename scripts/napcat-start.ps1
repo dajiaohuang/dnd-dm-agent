@@ -6,11 +6,14 @@ $ErrorActionPreference = "Continue"
 $Base = $PSScriptRoot
 Set-Location (Split-Path $Base)
 
-$LocalQQ = Join-Path (Get-Location) "napcat_localqq"
-if (-not (Test-Path $LocalQQ)) {
-    Write-Host "[!] napcat_localqq not found. Run setup-napcat.ps1 first." -ForegroundColor Red
+# Auto-detect the local QQ directory (matches *_localqq)
+$LocalQQ = Get-ChildItem -Directory -Path (Get-Location) -Filter "*_localqq" |
+    Select-Object -First 1
+if (-not $LocalQQ) {
+    Write-Host "[!] No *_localqq directory found. Run setup-napcat.ps1 first." -ForegroundColor Red
     exit 1
 }
+$LocalQQ = $LocalQQ.FullName
 
 Write-Host "=== NapCat QQ ===" -ForegroundColor Cyan
 
@@ -76,7 +79,7 @@ if (-not (Test-Path $QQExe)) {
 }
 
 $QQRunning = Get-Process -Name "QQ" -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -like "*napcat_localqq*" }
+    Where-Object { $_.Path -like "*_localqq*" }
 
 if (-not $QQRunning) {
     Write-Host "[..] Starting QQ..." -ForegroundColor Yellow
